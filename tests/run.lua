@@ -14,6 +14,7 @@ local function eq(actual, expected, message)
 end
 
 local symbols = require("zed-bar.symbols")
+local sources = require("zed-bar.sources")
 
 local document_symbols = symbols.normalize({
   {
@@ -83,6 +84,88 @@ eq(
 )
 eq(#symbols.path(flat_symbols, { line = 11, character = 0 }), 0, "cursor outside symbols")
 
+local markdown_buf = vim.api.nvim_create_buf(false, true)
+vim.bo[markdown_buf].filetype = "markdown"
+vim.api.nvim_buf_set_lines(markdown_buf, 0, -1, false, {
+  "# Project",
+  "intro",
+  "## API",
+  "```lua",
+  "### ignored",
+  "```",
+  "### Endpoint ###",
+  "body",
+})
+local markdown_symbols = sources.markdown.get_symbols(markdown_buf, 0, { 8, 0 }, 8)
+eq(
+  vim.tbl_map(function(symbol)
+    return symbol.name
+  end, markdown_symbols),
+  { "Project", "API", "Endpoint" },
+  "Markdown headings ignore fenced code and form a hierarchy"
+)
+
+vim.api.nvim_buf_set_lines(markdown_buf, 6, 7, false, { "### Request" })
+markdown_symbols = sources.markdown.get_symbols(markdown_buf, 0, { 8, 0 }, 8)
+eq(markdown_symbols[3].name, "Request", "Markdown cache follows changedtick")
+
+local long_markdown_buf = vim.api.nvim_create_buf(false, true)
+vim.bo[long_markdown_buf].filetype = "markdown"
+local long_markdown_lines = { "# Root" }
+for _ = 2, 249 do
+  table.insert(long_markdown_lines, "text")
+end
+table.insert(long_markdown_lines, "## Late section")
+table.insert(long_markdown_lines, "body")
+vim.api.nvim_buf_set_lines(long_markdown_buf, 0, -1, false, long_markdown_lines)
+sources.markdown.get_symbols(long_markdown_buf, 0, { 1, 0 }, 8)
+local extended_markdown = sources.markdown.get_symbols(long_markdown_buf, 0, { 251, 0 }, 8)
+eq(extended_markdown[2].name, "Late section", "Markdown parsing extends with the cursor")
+
+local fallback_symbols = sources.get_symbols({ "lsp", "markdown" }, {
+  buf = markdown_buf,
+  win = 0,
+  cursor = { 8, 0 },
+  max_depth = 8,
+  lsp_symbols = {},
+})
+eq(fallback_symbols[3].name, "Request", "an empty LSP result falls back to Markdown")
+local preferred_symbols = sources.get_symbols({ "lsp", "markdown" }, {
+  buf = markdown_buf,
+  win = 0,
+  cursor = { 8, 0 },
+  max_depth = 8,
+  lsp_symbols = { { name = "from LSP", kind = 12 } },
+})
+eq(preferred_symbols[1].name, "from LSP", "the first non-empty source wins")
+
+local treesitter = sources.treesitter
+eq(treesitter._kind("function_declaration"), "Function", "Tree-sitter function kind")
+eq(treesitter._kind("method_definition"), "Method", "Tree-sitter method kind")
+eq(treesitter._kind("jsx_element"), "Element", "Tree-sitter element kind")
+eq(treesitter._kind("if_statement"), "IfStatement", "Tree-sitter control-flow kind")
+
+local treesitter_buf = vim.api.nvim_create_buf(true, false)
+vim.bo[treesitter_buf].filetype = "typescript"
+vim.api.nvim_buf_set_lines(treesitter_buf, 0, -1, false, {
+  "function outer() {",
+  "  const inner = () => 1",
+  "  return inner()",
+  "}",
+})
+local has_parser, parser = pcall(vim.treesitter.get_parser, treesitter_buf, "typescript")
+if has_parser then
+  parser:parse()
+  local treesitter_symbols = treesitter.get_symbols(treesitter_buf, 0, { 3, 10 }, 8)
+  assert(treesitter_symbols[1], "Tree-sitter returns symbols for the current line")
+  assert(
+    vim.iter(treesitter_symbols):any(function(symbol)
+      return symbol.kind == "Function" or symbol.kind == "Call"
+    end),
+    "Tree-sitter includes the enclosing function or current call"
+  )
+end
+
 local zed_bar = require("zed-bar")
 zed_bar.setup({ path = "relative", update_debounce = 0, symbol_debounce = 0 })
 vim.api.nvim_buf_set_name(0, root .. "/src/components/CNUserModal/index.tsx")
@@ -147,5 +230,16 @@ eq(
 )
 
 vim.lsp.get_clients = original_get_clients
+
+if has_parser then
+  vim.api.nvim_buf_set_name(treesitter_buf, root .. "/src/fallback.ts")
+  vim.api.nvim_win_set_buf(0, treesitter_buf)
+  vim.api.nvim_win_set_cursor(0, { 3, 10 })
+  zed_bar._render(0)
+  assert(
+    vim.wo.winbar:find("outer", 1, true),
+    "winbar renders the Tree-sitter fallback: " .. vim.wo.winbar
+  )
+end
 
 print("zed-bar.nvim tests passed")

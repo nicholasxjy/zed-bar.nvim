@@ -123,6 +123,9 @@ function M.path(symbols, position, max_depth)
 end
 
 function M.kind(symbol)
+  if type(symbol.kind) == "string" then
+    return symbol.kind
+  end
   return kinds.names[symbol.kind] or "Object"
 end
 

@@ -1,5 +1,6 @@
 local config = require("zed-bar.config")
 local kinds = require("zed-bar.kinds")
+local sources = require("zed-bar.sources")
 local symbols = require("zed-bar.symbols")
 
 local M = {}
@@ -49,15 +50,29 @@ local function render(win)
 
   local parts = { component(get_path(buf), "ZedBarFile") }
   local state = cache[buf]
+  local cursor = vim.api.nvim_win_get_cursor(win)
+  local lsp_symbols = {}
   if state and state.symbols then
-    local path =
+    lsp_symbols =
       symbols.path(state.symbols, position(win, state.encoding), config.options.max_depth)
-    for _, symbol in ipairs(path) do
-      local kind = symbols.kind(symbol)
-      table.insert(parts, component(config.options.separator, "ZedBarSeparator"))
-      table.insert(parts, component(kinds.icons[kind] or "", "ZedBarIconKind" .. kind))
-      table.insert(parts, component(symbol.name, "ZedBarKind" .. kind))
-    end
+  end
+
+  local source_names = config.options.sources
+  if type(source_names) == "function" then
+    source_names = source_names(buf, win)
+  end
+  local current_symbols = sources.get_symbols(source_names, {
+    buf = buf,
+    win = win,
+    cursor = cursor,
+    max_depth = config.options.max_depth,
+    lsp_symbols = lsp_symbols,
+  })
+  for _, symbol in ipairs(current_symbols) do
+    local kind = symbols.kind(symbol)
+    table.insert(parts, component(config.options.separator, "ZedBarSeparator"))
+    table.insert(parts, component(kinds.icons[kind] or "", "ZedBarIconKind" .. kind))
+    table.insert(parts, component(symbol.name, "ZedBarKind" .. kind))
   end
 
   local padding = config.options.padding
@@ -140,6 +155,7 @@ local function schedule_symbols(buf)
     config.options.symbol_debounce,
     0,
     vim.schedule_wrap(function()
+      sources.invalidate(buf)
       request_symbols(buf)
     end)
   )
@@ -151,6 +167,7 @@ local function cleanup(buf)
     state.client:cancel_request(state.request_id)
   end
   cache[buf] = nil
+  sources.invalidate(buf)
   if symbol_timers[buf] then
     symbol_timers[buf]:stop()
     symbol_timers[buf]:close()
@@ -173,6 +190,12 @@ function M.setup(opts)
     end,
   })
   vim.api.nvim_create_autocmd("BufFilePost", {
+    group = group,
+    callback = function(args)
+      render_buffer(args.buf)
+    end,
+  })
+  vim.api.nvim_create_autocmd("FileType", {
     group = group,
     callback = function(args)
       render_buffer(args.buf)
@@ -241,10 +264,13 @@ function M.setup(opts)
 end
 
 function M.refresh(buf)
-  request_symbols(buf or vim.api.nvim_get_current_buf())
+  buf = buf or vim.api.nvim_get_current_buf()
+  sources.invalidate(buf)
+  request_symbols(buf)
 end
 
 M._symbols = symbols
+M._sources = sources
 M._render = render
 
 return M

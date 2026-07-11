@@ -56,6 +56,38 @@ M.icons = {
   Event = " ",
   Operator = "󰆕 ",
   TypeParameter = "󰆩 ",
+  BlockMappingPair = "󰅩 ",
+  Call = "󰃷 ",
+  CaseStatement = "󱃙 ",
+  Declaration = "󰙠 ",
+  DoStatement = "󰑖 ",
+  Element = "󰅩 ",
+  ForStatement = "󰑖 ",
+  Identifier = "󰀫 ",
+  IfStatement = "󰇉 ",
+  List = "󰅪 ",
+  Macro = "󰁌 ",
+  MarkdownH1 = "󰉫 ",
+  MarkdownH2 = "󰉬 ",
+  MarkdownH3 = "󰉭 ",
+  MarkdownH4 = "󰉮 ",
+  MarkdownH5 = "󰉯 ",
+  MarkdownH6 = "󰉰 ",
+  Pair = "󰅪 ",
+  Reference = "󰦾 ",
+  Repeat = "󰑖 ",
+  ReturnStatement = "󰌑 ",
+  Rule = "󰅩 ",
+  RuleSet = "󰅩 ",
+  Scope = "󰅩 ",
+  Section = "󰅩 ",
+  Specifier = "󰦪 ",
+  Statement = "󰅩 ",
+  SwitchStatement = "󰺟 ",
+  Table = "󰅩 ",
+  Type = " ",
+  Value = "󰎠 ",
+  WhileStatement = "󰑖 ",
 }
 
 local links = {
@@ -85,6 +117,38 @@ local links = {
   Event = "Special",
   Operator = "Operator",
   TypeParameter = "Type",
+  BlockMappingPair = "Identifier",
+  Call = "Function",
+  CaseStatement = "Conditional",
+  Declaration = "Keyword",
+  DoStatement = "Repeat",
+  Element = "Tag",
+  ForStatement = "Repeat",
+  Identifier = "Identifier",
+  IfStatement = "Conditional",
+  List = "Type",
+  Macro = "Macro",
+  MarkdownH1 = "Title",
+  MarkdownH2 = "Title",
+  MarkdownH3 = "Title",
+  MarkdownH4 = "Title",
+  MarkdownH5 = "Title",
+  MarkdownH6 = "Title",
+  Pair = "Identifier",
+  Reference = "Identifier",
+  Repeat = "Repeat",
+  ReturnStatement = "Keyword",
+  Rule = "Identifier",
+  RuleSet = "Identifier",
+  Scope = "Identifier",
+  Section = "Title",
+  Specifier = "Keyword",
+  Statement = "Normal",
+  SwitchStatement = "Conditional",
+  Table = "Type",
+  Type = "Type",
+  Value = "Constant",
+  WhileStatement = "Repeat",
 }
 
 function M.setup_highlights()
@@ -92,7 +156,7 @@ function M.setup_highlights()
   vim.api.nvim_set_hl(0, "ZedBarFile", { default = true, link = "Comment" })
   vim.api.nvim_set_hl(0, "ZedBarSeparator", { default = true, link = "Comment" })
 
-  for _, kind in pairs(M.names) do
+  for kind in pairs(M.icons) do
     local link = links[kind] or "Normal"
     vim.api.nvim_set_hl(0, "ZedBarKind" .. kind, { default = true, link = link })
     vim.api.nvim_set_hl(0, "ZedBarIconKind" .. kind, { default = true, link = link })

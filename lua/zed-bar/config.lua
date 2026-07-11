@@ -7,6 +7,12 @@ M.defaults = {
   update_debounce = 24,
   symbol_debounce = 120,
   max_depth = 8,
+  sources = function(buf)
+    if vim.bo[buf].filetype == "markdown" then
+      return { "markdown", "lsp", "treesitter" }
+    end
+    return { "lsp", "treesitter" }
+  end,
   enabled = function(buf, win)
     return vim.api.nvim_buf_is_valid(buf)
       and vim.api.nvim_win_is_valid(win)
