@@ -144,6 +144,10 @@ eq(treesitter._kind("function_declaration"), "Function", "Tree-sitter function k
 eq(treesitter._kind("method_definition"), "Method", "Tree-sitter method kind")
 eq(treesitter._kind("jsx_element"), "Element", "Tree-sitter element kind")
 eq(treesitter._kind("if_statement"), "IfStatement", "Tree-sitter control-flow kind")
+eq(treesitter._extract_name("return inner()"), "return inner", "stop before call arguments")
+eq(treesitter._extract_name("if (ready) {"), "if", "stop before a condition")
+eq(treesitter._extract_name("const value = call()"), "const value", "stop before assignment")
+eq(treesitter._extract_name("foo.bar:baz()"), "foo.bar:baz", "keep qualified names")
 
 local treesitter_buf = vim.api.nvim_create_buf(true, false)
 vim.bo[treesitter_buf].filetype = "typescript"
@@ -164,6 +168,9 @@ if has_parser then
     end),
     "Tree-sitter includes the enclosing function or current call"
   )
+  for _, symbol in ipairs(treesitter_symbols) do
+    assert(not symbol.name:find("[(){}=]"), "Tree-sitter symbols use short names: " .. symbol.name)
+  end
 end
 
 local zed_bar = require("zed-bar")

@@ -63,17 +63,23 @@ local function node_text(node, buf)
   return vim.trim(text:gsub("%s+", " "))
 end
 
+local name_pattern = [[[#~!@*&.]*\k\+!\?\%\(\%\(\s\+\|:\+\|->\|-\+\|\.\+\)[#~!@*&.]*\k\+!\?\)*]]
+
+local function extract_name(text)
+  local name = vim.fn.matchstr(text, name_pattern)
+  return vim.fn.strcharpart(vim.trim(name), 0, 60)
+end
+
 local function short_name(node, buf)
   for _, field in ipairs({ "name", "declarator", "key", "field", "tag_name" }) do
     local child = node:field(field)[1]
-    local text = node_text(child, buf)
-    if text ~= "" then
-      return vim.fn.strcharpart(text, 0, 60)
+    local name = extract_name(node_text(child, buf))
+    if name ~= "" then
+      return name
     end
   end
 
-  local text = node_text(node, buf)
-  return vim.fn.strcharpart(text, 0, 60)
+  return extract_name(node_text(node, buf))
 end
 
 function M.get_symbols(buf, _, cursor, max_depth)
@@ -109,5 +115,6 @@ end
 function M.invalidate() end
 
 M._kind = kind
+M._extract_name = extract_name
 
 return M
