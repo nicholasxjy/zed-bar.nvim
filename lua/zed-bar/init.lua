@@ -18,6 +18,14 @@ local function component(text, highlight)
   return "%#" .. highlight .. "#" .. statusline_escape(text) .. "%*"
 end
 
+local function set_winbar(win, value)
+  if vim.wo[win].winbar == value then
+    return false
+  end
+  vim.wo[win].winbar = value
+  return true
+end
+
 local function get_path(buf)
   local name = vim.api.nvim_buf_get_name(buf)
   if config.options.path == "basename" then
@@ -44,8 +52,7 @@ local function render(win)
   end
   local buf = vim.api.nvim_win_get_buf(win)
   if not config.options.enabled(buf, win) then
-    vim.wo[win].winbar = ""
-    return
+    return set_winbar(win, "")
   end
 
   local parts = { component(get_path(buf), "ZedBarFile") }
@@ -76,9 +83,10 @@ local function render(win)
   end
 
   local padding = config.options.padding
-  vim.wo[win].winbar = component(string.rep(" ", padding.left), "ZedBarNormal")
+  local value = component(string.rep(" ", padding.left), "ZedBarNormal")
     .. table.concat(parts)
     .. component(string.rep(" ", padding.right), "ZedBarNormal")
+  return set_winbar(win, value)
 end
 
 local function render_buffer(buf)
@@ -180,6 +188,12 @@ function M.setup(opts)
   kinds.setup_highlights()
 
   vim.api.nvim_clear_autocmds({ group = group })
+  vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile", "BufEnter" }, {
+    group = group,
+    callback = function(args)
+      render_buffer(args.buf)
+    end,
+  })
   vim.api.nvim_create_autocmd({ "BufWinEnter", "WinEnter" }, {
     group = group,
     callback = function(args)
@@ -272,5 +286,6 @@ end
 M._symbols = symbols
 M._sources = sources
 M._render = render
+M._set_winbar = set_winbar
 
 return M

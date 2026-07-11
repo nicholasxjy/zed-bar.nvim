@@ -119,7 +119,8 @@ Cursor movement walks the cached LSP/Markdown data or the current Tree-sitter an
 updates a pre-rendered winbar string. LSP requests are asynchronous, debounced, and limited to
 buffer text changes, writes, attach events, or explicit refreshes. An outdated in-flight request
 is cancelled before a new one is sent. When LSP has no symbol at the cursor, Tree-sitter is used
-automatically.
+automatically. The winbar row is reserved before the buffer is displayed, and identical renders
+are skipped to avoid first-entry flicker and unnecessary redraws.
 
 ## Testing
 

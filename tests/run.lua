@@ -177,6 +177,7 @@ local zed_bar = require("zed-bar")
 zed_bar.setup({ path = "relative", update_debounce = 0, symbol_debounce = 0 })
 vim.api.nvim_buf_set_name(0, root .. "/src/components/CNUserModal/index.tsx")
 zed_bar._render(0)
+eq(zed_bar._render(0), false, "unchanged winbar content does not trigger another assignment")
 local winbar = vim.wo.winbar
 assert(
   winbar:find("src/components/CNUserModal/index.tsx", 1, true),
@@ -248,5 +249,12 @@ if has_parser then
     "winbar renders the Tree-sitter fallback: " .. vim.wo.winbar
   )
 end
+
+local first_enter_buf = vim.api.nvim_create_buf(true, false)
+vim.api.nvim_buf_set_name(first_enter_buf, root .. "/src/first-enter.lua")
+vim.api.nvim_win_set_buf(0, first_enter_buf)
+vim.wo.winbar = ""
+vim.api.nvim_exec_autocmds("BufReadPre", { buffer = first_enter_buf })
+assert(vim.wo.winbar:find("src/first-enter.lua", 1, true), "BufReadPre reserves the winbar row")
 
 print("zed-bar.nvim tests passed")
