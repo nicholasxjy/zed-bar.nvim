@@ -148,6 +148,9 @@ eq(treesitter._extract_name("return inner()"), "return inner", "stop before call
 eq(treesitter._extract_name("if (ready) {"), "if", "stop before a condition")
 eq(treesitter._extract_name("const value = call()"), "const value", "stop before assignment")
 eq(treesitter._extract_name("foo.bar:baz()"), "foo.bar:baz", "keep qualified names")
+eq(treesitter._canonical_name("local current_symbols"), "current_symbols", "ignore local")
+eq(treesitter._canonical_name("public static value"), "value", "ignore declaration modifiers")
+eq(treesitter._canonical_name("return value"), "return value", "keep control-flow keywords")
 
 local treesitter_buf = vim.api.nvim_create_buf(true, false)
 vim.bo[treesitter_buf].filetype = "typescript"
@@ -189,6 +192,38 @@ if has_lua_parser then
   )
   eq(lua_symbols[1].kind, "Variable", "the more specific child symbol is kept")
 end
+
+local duplicate_buf = vim.api.nvim_create_buf(true, false)
+vim.bo[duplicate_buf].filetype = "lua"
+vim.api.nvim_buf_set_lines(duplicate_buf, 0, -1, false, {
+  "local function render()",
+  "  local current_symbols = sources.get_symbols(source_names, {",
+  "    buf = buf,",
+  "  })",
+  "end",
+})
+local has_duplicate_parser, duplicate_parser =
+  pcall(vim.treesitter.get_parser, duplicate_buf, "lua")
+if has_duplicate_parser then
+  duplicate_parser:parse()
+  local duplicate_symbols = treesitter.get_symbols(duplicate_buf, 0, { 3, 6 }, 8)
+  eq(
+    vim.tbl_map(function(symbol)
+      return symbol.name
+    end, duplicate_symbols),
+    { "render", "current_symbols", "sources.get_symbols", "buf" },
+    "declaration parents do not repeat their more specific child"
+  )
+end
+
+local lsp_preferred = sources.get_symbols({ "lsp", "treesitter" }, {
+  buf = duplicate_buf,
+  win = 0,
+  cursor = { 3, 6 },
+  max_depth = 8,
+  lsp_symbols = { { name = "LSP symbol", kind = 12 } },
+})
+eq(lsp_preferred, { { name = "LSP symbol", kind = 12 } }, "LSP prevents Tree-sitter overlap")
 
 local zed_bar = require("zed-bar")
 zed_bar.setup({ path = "relative", update_debounce = 0, symbol_debounce = 0 })

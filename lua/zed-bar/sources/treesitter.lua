@@ -70,6 +70,31 @@ local function extract_name(text)
   return vim.fn.strcharpart(vim.trim(name), 0, 60)
 end
 
+local declaration_keywords = {
+  ["const"] = true,
+  ["declare"] = true,
+  ["default"] = true,
+  ["export"] = true,
+  ["final"] = true,
+  ["let"] = true,
+  ["local"] = true,
+  ["mut"] = true,
+  ["private"] = true,
+  ["protected"] = true,
+  ["public"] = true,
+  ["readonly"] = true,
+  ["static"] = true,
+  ["var"] = true,
+}
+
+local function canonical_name(name)
+  local words = vim.split(name, "%s+")
+  while #words > 1 and declaration_keywords[words[1]] do
+    table.remove(words, 1)
+  end
+  return table.concat(words, " ")
+end
+
 local function short_name(node, buf)
   for _, field in ipairs({ "name", "declarator", "key", "field", "tag_name" }) do
     local child = node:field(field)[1]
@@ -103,7 +128,7 @@ function M.get_symbols(buf, _, cursor, max_depth)
     if node_kind then
       local name = short_name(node, buf)
       local previous = result[1]
-      if name ~= "" and (not previous or previous.name ~= name) then
+      if name ~= "" and (not previous or canonical_name(previous.name) ~= canonical_name(name)) then
         table.insert(result, 1, { name = name, kind = node_kind })
       end
     end
@@ -116,5 +141,6 @@ function M.invalidate() end
 
 M._kind = kind
 M._extract_name = extract_name
+M._canonical_name = canonical_name
 
 return M
