@@ -1,6 +1,7 @@
 # Compiled Lua sources
 luac.out
 nvim.log
+.omx/
 
 # luarocks build files
 *.src.rock
