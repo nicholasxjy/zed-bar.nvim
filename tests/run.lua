@@ -84,6 +84,24 @@ eq(
 )
 eq(#symbols.path(flat_symbols, { line = 11, character = 0 }), 0, "cursor outside symbols")
 
+local overlapping_symbols = symbols.normalize({
+  {
+    name = "outer",
+    kind = 12,
+    range = { start = { line = 0, character = 0 }, ["end"] = { line = 100, character = 0 } },
+  },
+  {
+    name = "earlier inner",
+    kind = 12,
+    range = { start = { line = 10, character = 0 }, ["end"] = { line = 20, character = 0 } },
+  },
+})
+eq(
+  symbols.path(overlapping_symbols, { line = 50, character = 0 })[1].name,
+  "outer",
+  "binary lookup still finds an earlier overlapping range"
+)
+
 local markdown_buf = vim.api.nvim_create_buf(false, true)
 vim.bo[markdown_buf].filetype = "markdown"
 vim.api.nvim_buf_set_lines(markdown_buf, 0, -1, false, {
@@ -308,5 +326,18 @@ vim.api.nvim_win_set_buf(0, first_enter_buf)
 vim.wo.winbar = ""
 vim.api.nvim_exec_autocmds("BufReadPre", { buffer = first_enter_buf })
 assert(vim.wo.winbar:find("src/first-enter.lua", 1, true), "BufReadPre reserves the winbar row")
+
+local custom_path_calls = 0
+zed_bar.setup({
+  path = function(_, name)
+    custom_path_calls = custom_path_calls + 1
+    return vim.fs.basename(name)
+  end,
+  update_debounce = 0,
+})
+local calls_after_setup = custom_path_calls
+zed_bar._render(0)
+zed_bar._render(0)
+eq(custom_path_calls, calls_after_setup + 2, "custom path functions are never render-cached")
 
 print("zed-bar.nvim tests passed")

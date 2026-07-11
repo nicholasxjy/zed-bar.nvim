@@ -106,7 +106,18 @@ local function find_path(symbols, position, path, max_depth)
     return
   end
 
-  for index = #symbols, 1, -1 do
+  local low, high, candidate = 1, #symbols, 0
+  while low <= high do
+    local middle = math.floor((low + high) / 2)
+    if before(position, symbols[middle].range.start) then
+      high = middle - 1
+    else
+      candidate = middle
+      low = middle + 1
+    end
+  end
+
+  for index = candidate, 1, -1 do
     local symbol = symbols[index]
     if position_in_range(position, symbol.range) then
       table.insert(path, symbol)

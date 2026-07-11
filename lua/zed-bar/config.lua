@@ -1,5 +1,8 @@
 local M = {}
 
+local code_sources = { "lsp", "treesitter" }
+local markdown_sources = { "markdown", "lsp", "treesitter" }
+
 M.defaults = {
   path = "relative",
   separator = " › ",
@@ -9,9 +12,9 @@ M.defaults = {
   max_depth = 8,
   sources = function(buf)
     if vim.bo[buf].filetype == "markdown" then
-      return { "markdown", "lsp", "treesitter" }
+      return markdown_sources
     end
-    return { "lsp", "treesitter" }
+    return code_sources
   end,
   enabled = function(buf, win)
     return vim.api.nvim_buf_is_valid(buf)

@@ -7,8 +7,12 @@ local M = {}
 
 local group = vim.api.nvim_create_augroup("ZedBar", { clear = true })
 local cache = {}
+local path_cache = {}
+local render_cache = {}
 local window_timers = {}
 local symbol_timers = {}
+local symbol_timer_generations = {}
+local timer_generation = 0
 
 local function statusline_escape(value)
   return value:gsub("%%", "%%%%")
@@ -26,15 +30,36 @@ local function set_winbar(win, value)
   return true
 end
 
-local function get_path(buf)
-  local name = vim.api.nvim_buf_get_name(buf)
+local function close_timer(timer)
+  if not timer then
+    return
+  end
+  timer:stop()
+  if not timer:is_closing() then
+    timer:close()
+  end
+end
+
+local function get_path(buf, name)
   if config.options.path == "basename" then
-    return vim.fs.basename(name)
+    local cached = path_cache[buf]
+    if cached and cached.name == name and cached.mode == "basename" then
+      return cached.value
+    end
+    local value = vim.fs.basename(name)
+    path_cache[buf] = { mode = "basename", name = name, value = value }
+    return value
   end
   if type(config.options.path) == "function" then
     return config.options.path(buf, name)
   end
-  return vim.fn.fnamemodify(name, ":~:.")
+  local cached = path_cache[buf]
+  if cached and cached.name == name and cached.mode == "relative" then
+    return cached.value
+  end
+  local value = vim.fn.fnamemodify(name, ":~:.")
+  path_cache[buf] = { mode = "relative", name = name, value = value }
+  return value
 end
 
 local function position(win, encoding)
@@ -52,12 +77,35 @@ local function render(win)
   end
   local buf = vim.api.nvim_win_get_buf(win)
   if not config.options.enabled(buf, win) then
+    render_cache[win] = nil
     return set_winbar(win, "")
   end
 
-  local parts = { component(get_path(buf), "ZedBarFile") }
   local state = cache[buf]
   local cursor = vim.api.nvim_win_get_cursor(win)
+  local changedtick = vim.api.nvim_buf_get_changedtick(buf)
+  local name = vim.api.nvim_buf_get_name(buf)
+  local filetype = vim.bo[buf].filetype
+  local can_cache = type(config.options.path) ~= "function"
+    and config.options.sources == config.defaults.sources
+  local previous_render = render_cache[win]
+  local lsp_symbols_table = state and state.symbols or nil
+  if
+    can_cache
+    and previous_render
+    and previous_render.buf == buf
+    and previous_render.changedtick == changedtick
+    and previous_render.col == cursor[2]
+    and previous_render.filetype == filetype
+    and previous_render.line == cursor[1]
+    and previous_render.lsp_symbols == lsp_symbols_table
+    and previous_render.name == name
+    and previous_render.value == vim.wo[win].winbar
+  then
+    return false
+  end
+
+  local parts = { component(get_path(buf, name), "ZedBarFile") }
   local lsp_symbols = {}
   if state and state.symbols then
     lsp_symbols =
@@ -86,12 +134,32 @@ local function render(win)
   local value = component(string.rep(" ", padding.left), "ZedBarNormal")
     .. table.concat(parts)
     .. component(string.rep(" ", padding.right), "ZedBarNormal")
+  if can_cache then
+    local current_render = previous_render or {}
+    current_render.buf = buf
+    current_render.changedtick = changedtick
+    current_render.col = cursor[2]
+    current_render.filetype = filetype
+    current_render.line = cursor[1]
+    current_render.lsp_symbols = lsp_symbols_table
+    current_render.name = name
+    current_render.value = value
+    render_cache[win] = current_render
+  else
+    render_cache[win] = nil
+  end
   return set_winbar(win, value)
 end
 
 local function render_buffer(buf)
   for _, win in ipairs(vim.fn.win_findbuf(buf)) do
     render(win)
+  end
+end
+
+local function invalidate_render_buffer(buf)
+  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+    render_cache[win] = nil
   end
 end
 
@@ -159,10 +227,21 @@ local function schedule_symbols(buf)
   else
     symbol_timers[buf] = vim.uv.new_timer()
   end
+  timer_generation = timer_generation + 1
+  local generation = timer_generation
+  symbol_timer_generations[buf] = generation
   symbol_timers[buf]:start(
     config.options.symbol_debounce,
     0,
     vim.schedule_wrap(function()
+      if symbol_timer_generations[buf] ~= generation then
+        return
+      end
+      local timer = symbol_timers[buf]
+      symbol_timers[buf] = nil
+      symbol_timer_generations[buf] = nil
+      close_timer(timer)
+      invalidate_render_buffer(buf)
       sources.invalidate(buf)
       request_symbols(buf)
     end)
@@ -175,17 +254,30 @@ local function cleanup(buf)
     state.client:cancel_request(state.request_id)
   end
   cache[buf] = nil
+  path_cache[buf] = nil
   sources.invalidate(buf)
   if symbol_timers[buf] then
-    symbol_timers[buf]:stop()
-    symbol_timers[buf]:close()
+    close_timer(symbol_timers[buf])
     symbol_timers[buf] = nil
   end
+  symbol_timer_generations[buf] = nil
+  invalidate_render_buffer(buf)
 end
 
 function M.setup(opts)
+  for _, timer in pairs(window_timers) do
+    close_timer(timer)
+  end
+  for _, timer in pairs(symbol_timers) do
+    close_timer(timer)
+  end
+  window_timers = {}
+  symbol_timers = {}
+  symbol_timer_generations = {}
   config.setup(opts)
   kinds.setup_highlights()
+  path_cache = {}
+  render_cache = {}
 
   vim.api.nvim_clear_autocmds({ group = group })
   vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile", "BufEnter" }, {
@@ -206,6 +298,8 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("BufFilePost", {
     group = group,
     callback = function(args)
+      path_cache[args.buf] = nil
+      invalidate_render_buffer(args.buf)
       render_buffer(args.buf)
     end,
   })
@@ -246,7 +340,7 @@ function M.setup(opts)
       end)
     end,
   })
-  vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
+  vim.api.nvim_create_autocmd({ "BufDelete", "BufUnload", "BufWipeout" }, {
     group = group,
     callback = function(args)
       cleanup(args.buf)
@@ -257,15 +351,27 @@ function M.setup(opts)
     callback = function(args)
       local win = tonumber(args.match)
       if win and window_timers[win] then
-        window_timers[win]:stop()
-        window_timers[win]:close()
+        close_timer(window_timers[win])
         window_timers[win] = nil
+      end
+      if win then
+        render_cache[win] = nil
       end
     end,
   })
   vim.api.nvim_create_autocmd("ColorScheme", {
     group = group,
     callback = kinds.setup_highlights,
+  })
+  vim.api.nvim_create_autocmd("DirChanged", {
+    group = group,
+    callback = function()
+      path_cache = {}
+      render_cache = {}
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        render(win)
+      end
+    end,
   })
 
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -279,6 +385,7 @@ end
 
 function M.refresh(buf)
   buf = buf or vim.api.nvim_get_current_buf()
+  invalidate_render_buffer(buf)
   sources.invalidate(buf)
   request_symbols(buf)
 end

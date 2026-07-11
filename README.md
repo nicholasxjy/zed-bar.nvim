@@ -6,6 +6,10 @@ It renders the current buffer path first, followed by the symbol hierarchy at th
 come from Markdown headings, LSP, or Tree-sitter and include a Nerd Font icon plus a matching
 highlight.
 
+## Demo
+
+![zed-bar.nvim demo](assets/demo.png)
+
 ## Features
 
 - Current buffer path with its own highlight group
@@ -122,8 +126,13 @@ is cancelled before a new one is sent. When LSP has no symbol at the cursor, Tre
 automatically. The winbar row is reserved before the buffer is displayed, and identical renders
 are skipped to avoid first-entry flicker and unnecessary redraws.
 
+Hot paths use a compiled Tree-sitter name matcher, cached node-kind lookups, cached buffer paths,
+and binary search over sorted LSP symbols. Idle debounce timers and unloaded-buffer caches are
+released automatically.
+
 ## Testing
 
 ```sh
 nvim --headless -u NONE -l tests/run.lua
+nvim --headless -u NONE -l tests/benchmark.lua
 ```
