@@ -1,5 +1,6 @@
 # Compiled Lua sources
 luac.out
+nvim.log
 
 # luarocks build files
 *.src.rock
@@ -38,4 +39,3 @@ luac.out
 *.i*86
 *.x86_64
 *.hex
-
