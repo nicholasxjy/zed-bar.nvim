@@ -173,6 +173,23 @@ if has_parser then
   end
 end
 
+local lua_buf = vim.api.nvim_create_buf(true, false)
+vim.bo[lua_buf].filetype = "lua"
+vim.api.nvim_buf_set_lines(lua_buf, 0, -1, false, { "vim.g.loaded_zed_bar = true" })
+local has_lua_parser, lua_parser = pcall(vim.treesitter.get_parser, lua_buf, "lua")
+if has_lua_parser then
+  lua_parser:parse()
+  local lua_symbols = treesitter.get_symbols(lua_buf, 0, { 1, 0 }, 8)
+  eq(
+    vim.tbl_map(function(symbol)
+      return symbol.name
+    end, lua_symbols),
+    { "vim.g.loaded_zed_bar", "vim" },
+    "same-name parent nodes are removed while the later child is kept"
+  )
+  eq(lua_symbols[1].kind, "Variable", "the more specific child symbol is kept")
+end
+
 local zed_bar = require("zed-bar")
 zed_bar.setup({ path = "relative", update_debounce = 0, symbol_debounce = 0 })
 vim.api.nvim_buf_set_name(0, root .. "/src/components/CNUserModal/index.tsx")

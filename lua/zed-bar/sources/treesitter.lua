@@ -103,7 +103,7 @@ function M.get_symbols(buf, _, cursor, max_depth)
     if node_kind then
       local name = short_name(node, buf)
       local previous = result[1]
-      if name ~= "" and (not previous or previous.name ~= name or previous.kind ~= node_kind) then
+      if name ~= "" and (not previous or previous.name ~= name) then
         table.insert(result, 1, { name = name, kind = node_kind })
       end
     end
