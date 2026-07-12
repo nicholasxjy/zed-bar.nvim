@@ -60,6 +60,12 @@ require("zed-bar").setup({
   update_debounce = 24,
   symbol_debounce = 120,
   max_depth = 8,
+  disabled_filetypes = {},
+  -- Override individual symbol icons while keeping the remaining defaults.
+  kinds = {
+    Function = "󰊕 ",
+    Class = " ",
+  },
   -- Sources are tried in order; the first non-empty result wins.
   sources = function(buf)
     if vim.bo[buf].filetype == "markdown" then
