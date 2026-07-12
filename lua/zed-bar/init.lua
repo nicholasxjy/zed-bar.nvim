@@ -71,12 +71,20 @@ local function position(win, encoding)
   return { line = cursor[1] - 1, character = cursor[2] }
 end
 
+local function is_disabled(buf)
+  return vim.list_contains(config.options.disabled_filetypes, vim.bo[buf].filetype)
+end
+
+local function is_enabled(buf, win)
+  return not is_disabled(buf) and config.options.enabled(buf, win)
+end
+
 local function render(win)
   if not vim.api.nvim_win_is_valid(win) then
     return
   end
   local buf = vim.api.nvim_win_get_buf(win)
-  if not config.options.enabled(buf, win) then
+  if not is_enabled(buf, win) then
     render_cache[win] = nil
     return set_winbar(win, "")
   end
@@ -126,7 +134,7 @@ local function render(win)
   for _, symbol in ipairs(current_symbols) do
     local kind = symbols.kind(symbol)
     table.insert(parts, component(config.options.separator, "ZedBarSeparator"))
-    table.insert(parts, component(kinds.icons[kind] or "", "ZedBarIconKind" .. kind))
+    table.insert(parts, component(config.options.kinds[kind] or "", "ZedBarIconKind" .. kind))
     table.insert(parts, component(symbol.name, "ZedBarKind" .. kind))
   end
 
@@ -183,7 +191,7 @@ local function supporting_client(buf)
 end
 
 local function request_symbols(buf)
-  if not vim.api.nvim_buf_is_valid(buf) then
+  if not vim.api.nvim_buf_is_valid(buf) or is_disabled(buf) then
     return
   end
   local client = supporting_client(buf)
@@ -275,7 +283,7 @@ function M.setup(opts)
   symbol_timers = {}
   symbol_timer_generations = {}
   config.setup(opts)
-  kinds.setup_highlights()
+  kinds.setup_highlights(config.options.kinds)
   path_cache = {}
   render_cache = {}
 
@@ -306,6 +314,9 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("FileType", {
     group = group,
     callback = function(args)
+      if is_disabled(args.buf) then
+        cleanup(args.buf)
+      end
       render_buffer(args.buf)
     end,
   })
@@ -361,7 +372,9 @@ function M.setup(opts)
   })
   vim.api.nvim_create_autocmd("ColorScheme", {
     group = group,
-    callback = kinds.setup_highlights,
+    callback = function()
+      kinds.setup_highlights(config.options.kinds)
+    end,
   })
   vim.api.nvim_create_autocmd("DirChanged", {
     group = group,
@@ -375,8 +388,11 @@ function M.setup(opts)
   })
 
   for _, win in ipairs(vim.api.nvim_list_wins()) do
-    render(win)
     local buf = vim.api.nvim_win_get_buf(win)
+    if is_disabled(buf) then
+      cleanup(buf)
+    end
+    render(win)
     if supporting_client(buf) and not cache[buf] then
       request_symbols(buf)
     end

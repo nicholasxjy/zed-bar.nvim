@@ -1,4 +1,5 @@
 local M = {}
+local kinds = require("zed-bar.kinds")
 
 local code_sources = { "lsp", "treesitter" }
 local markdown_sources = { "markdown", "lsp", "treesitter" }
@@ -10,6 +11,8 @@ M.defaults = {
   update_debounce = 24,
   symbol_debounce = 120,
   max_depth = 8,
+  kinds = kinds.icons,
+  disabled_filetypes = {},
   sources = function(buf)
     if vim.bo[buf].filetype == "markdown" then
       return markdown_sources

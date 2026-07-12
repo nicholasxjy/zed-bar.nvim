@@ -151,12 +151,12 @@ local links = {
   WhileStatement = "Repeat",
 }
 
-function M.setup_highlights()
+function M.setup_highlights(icons)
   vim.api.nvim_set_hl(0, "ZedBarNormal", { default = true, link = "WinBar" })
   vim.api.nvim_set_hl(0, "ZedBarFile", { default = true, link = "Comment" })
   vim.api.nvim_set_hl(0, "ZedBarSeparator", { default = true, link = "Comment" })
 
-  for kind in pairs(M.icons) do
+  for kind in pairs(icons or M.icons) do
     local link = links[kind] or "Normal"
     vim.api.nvim_set_hl(0, "ZedBarKind" .. kind, { default = true, link = link })
     vim.api.nvim_set_hl(0, "ZedBarIconKind" .. kind, { default = true, link = link })

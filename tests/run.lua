@@ -307,6 +307,27 @@ eq(
   "rendered layout matches the approved component order and spacing"
 )
 
+zed_bar.setup({
+  kinds = { Function = "fn " },
+  update_debounce = 0,
+  symbol_debounce = 0,
+})
+zed_bar._render(0)
+evaluated = vim.api.nvim_eval_statusline(vim.wo.winbar, {
+  winid = 0,
+  highlights = true,
+  use_winbar = true,
+})
+assert(evaluated.str:find("fn setOpen", 1, true), "symbol kind icons can be configured")
+
+vim.bo.filetype = "lua"
+zed_bar.setup({ disabled_filetypes = { "lua" } })
+eq(vim.wo.winbar, "", "disabled filetypes clear the winbar")
+local requests_before_refresh = next_request_id
+zed_bar.refresh()
+eq(next_request_id, requests_before_refresh, "disabled filetypes do not request LSP symbols")
+vim.bo.filetype = "typescriptreact"
+
 vim.lsp.get_clients = original_get_clients
 
 if has_parser then
