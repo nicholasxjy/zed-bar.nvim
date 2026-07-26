@@ -255,6 +255,31 @@ if has_duplicate_parser then
     { "render" },
     "nvim-treesitter locals queries select semantic ancestor nodes"
   )
+
+  local original_get_parser = vim.treesitter.get_parser
+  local original_get_node = vim.treesitter.get_node
+  local node = original_get_node({ bufnr = duplicate_buf, pos = { 2, 6 } })
+  package.preload["nvim-treesitter"] = function()
+    return {}
+  end
+  vim.treesitter.get_parser = function()
+    return nil
+  end
+  vim.treesitter.get_node = function()
+    return node
+  end
+  local nil_parser_symbols = treesitter.get_symbols(duplicate_buf, 0, { 3, 6 }, 8)
+  vim.treesitter.get_parser = original_get_parser
+  vim.treesitter.get_node = original_get_node
+  package.preload["nvim-treesitter"] = nil
+  package.loaded["nvim-treesitter"] = nil
+  eq(
+    vim.tbl_map(function(symbol)
+      return symbol.name
+    end, nil_parser_symbols),
+    { "render", "current_symbols", "sources.get_symbols", "buf" },
+    "a nil parser falls back to ancestor matching"
+  )
 end
 
 local lsp_preferred = sources.get_symbols({ "lsp", "treesitter" }, {

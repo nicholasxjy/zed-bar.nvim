@@ -180,7 +180,7 @@ local function query_nodes(buf, cursor)
   end
 
   local ok, parser = pcall(vim.treesitter.get_parser, buf)
-  if not ok then
+  if not ok or not parser then
     return
   end
   local ok_lang, lang = pcall(parser.lang, parser)
