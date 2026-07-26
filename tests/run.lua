@@ -232,6 +232,29 @@ if has_duplicate_parser then
     { "render", "current_symbols", "sources.get_symbols", "buf" },
     "declaration parents do not repeat their more specific child"
   )
+
+  local original_query_get = vim.treesitter.query.get
+  package.loaded["nvim-treesitter"] = nil
+  package.preload["nvim-treesitter"] = function()
+    return {}
+  end
+  vim.treesitter.query.get = function(lang, name)
+    if lang == "lua" and name == "locals" then
+      return vim.treesitter.query.parse("lua", "(function_declaration) @local.scope")
+    end
+    return original_query_get(lang, name)
+  end
+  local query_symbols = treesitter.get_symbols(duplicate_buf, 0, { 3, 6 }, 8)
+  vim.treesitter.query.get = original_query_get
+  package.preload["nvim-treesitter"] = nil
+  package.loaded["nvim-treesitter"] = nil
+  eq(
+    vim.tbl_map(function(symbol)
+      return symbol.name
+    end, query_symbols),
+    { "render" },
+    "nvim-treesitter locals queries select semantic ancestor nodes"
+  )
 end
 
 local lsp_preferred = sources.get_symbols({ "lsp", "treesitter" }, {

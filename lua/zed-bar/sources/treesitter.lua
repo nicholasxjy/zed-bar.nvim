@@ -154,20 +154,11 @@ local function short_name(node, buf, node_kind)
   return extract_name(node_text(node, buf))
 end
 
-function M.get_symbols(buf, _, cursor, max_depth)
-  local column = cursor[2]
-  if column > 0 and vim.fn.mode():find("i", 1, true) then
-    column = column - 1
-  end
-  local node = vim.F.npcall(vim.treesitter.get_node, {
-    bufnr = buf,
-    pos = { cursor[1] - 1, column },
-  })
-
+local function symbols_from_node(node, buf, max_depth, matched_nodes)
   local result = {}
   while node and #result < max_depth do
     local node_kind = kind(node:type())
-    if node_kind then
+    if node_kind and (not matched_nodes or matched_nodes[node:id()]) then
       local name = short_name(node, buf, node_kind)
       local previous = result[#result]
       if name ~= "" and (not previous or canonical_name(previous.name) ~= canonical_name(name)) then
@@ -181,6 +172,57 @@ function M.get_symbols(buf, _, cursor, max_depth)
     result[index], result[reverse_index] = result[reverse_index], result[index]
   end
   return result
+end
+
+local function query_nodes(buf, cursor)
+  if not pcall(require, "nvim-treesitter") then
+    return
+  end
+
+  local ok, parser = pcall(vim.treesitter.get_parser, buf)
+  if not ok then
+    return
+  end
+  local ok_lang, lang = pcall(parser.lang, parser)
+  local ok_query, query = pcall(vim.treesitter.query.get, lang, "locals")
+  if not ok_lang or not ok_query or not query then
+    return
+  end
+
+  local ok_nodes, matched_nodes = pcall(function()
+    local trees = parser:parse()
+    local root = trees[1] and trees[1]:root()
+    if not root then
+      return
+    end
+
+    local row, column = cursor[1] - 1, cursor[2]
+    local nodes = {}
+    for capture_id, node in query:iter_captures(root, buf, row, row + 1) do
+      if query.captures[capture_id] == "local.scope" then
+        local start_row, start_column, end_row, end_column = node:range()
+        if (start_row < row or (start_row == row and start_column <= column))
+          and (row < end_row or (row == end_row and column <= end_column))
+        then
+          nodes[node:id()] = true
+        end
+      end
+    end
+    return next(nodes) and nodes or nil
+  end)
+  return ok_nodes and matched_nodes or nil
+end
+
+function M.get_symbols(buf, _, cursor, max_depth)
+  local column = cursor[2]
+  if column > 0 and vim.fn.mode():find("i", 1, true) then
+    column = column - 1
+  end
+  local node = vim.F.npcall(vim.treesitter.get_node, {
+    bufnr = buf,
+    pos = { cursor[1] - 1, column },
+  })
+  return symbols_from_node(node, buf, max_depth, query_nodes(buf, { cursor[1], column }))
 end
 
 function M.invalidate() end

@@ -15,6 +15,7 @@ highlight.
 - Current buffer path with its own highlight group
 - Cursor-aware symbol breadcrumbs with Nerd Font icons
 - LSP, Tree-sitter, and Markdown heading sources
+- Optional nvim-treesitter query support for more precise code-symbol matching
 - Per-kind highlights for functions, classes, methods, variables, headings, control flow, and more
 - Asynchronous LSP requests with cancellation and debounced updates
 - No required plugin dependencies
@@ -43,6 +44,18 @@ require("zed-bar").setup()
 ```lua
 {
   "nicholasxjy/zed-bar.nvim",
+  config = function()
+    require("zed-bar").setup()
+  end,
+}
+```
+
+For more precise Tree-sitter breadcrumbs, optionally add `nvim-treesitter`:
+
+```lua
+{
+  "nicholasxjy/zed-bar.nvim",
+  dependencies = { "nvim-treesitter/nvim-treesitter" },
   config = function()
     require("zed-bar").setup()
   end,
@@ -91,7 +104,8 @@ Sources use fallback semantics: the first source that returns symbols at the cur
   `SymbolInformation` responses.
 - `treesitter`: follows the syntax-node ancestors at the cursor. It recognizes functions, methods,
   classes, declarations, variables, calls, control flow, JSX elements, mappings, and other common
-  node types.
+  node types. When `nvim-treesitter` and its `locals` query are available, it limits breadcrumbs to
+  semantic scope nodes; otherwise it uses the built-in ancestor matching.
 - `markdown`: builds the current heading hierarchy from ATX and Setext headings while ignoring
   headings inside fenced code blocks.
 
