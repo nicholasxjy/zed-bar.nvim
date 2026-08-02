@@ -174,8 +174,98 @@ local function symbols_from_node(node, buf, max_depth, matched_nodes)
   return result
 end
 
-local function query_nodes(buf, cursor)
-  if not pcall(require, "nvim-treesitter") then
+local no_nvim_treesitter = {}
+local nvim_treesitter = no_nvim_treesitter
+local nvim_treesitter_name
+local checked_nvim_treesitter = false
+
+local function get_nvim_treesitter()
+  local ts_utils_name = "nvim-treesitter.ts_utils"
+  local plugin_name = "nvim-treesitter"
+  if nvim_treesitter ~= no_nvim_treesitter then
+    local ts_utils_available = package.loaded[ts_utils_name] or package.preload[ts_utils_name]
+    if
+      (nvim_treesitter_name == plugin_name and ts_utils_available)
+      or package.loaded[nvim_treesitter_name] ~= nvim_treesitter
+    then
+      nvim_treesitter = no_nvim_treesitter
+      nvim_treesitter_name = nil
+    else
+      return nvim_treesitter
+    end
+  end
+  if
+    checked_nvim_treesitter
+    and not package.loaded[ts_utils_name]
+    and not package.preload[ts_utils_name]
+    and not package.loaded[plugin_name]
+    and not package.preload[plugin_name]
+  then
+    return
+  end
+  checked_nvim_treesitter = true
+  local ok, ts_utils = pcall(require, ts_utils_name)
+  if ok then
+    nvim_treesitter = ts_utils
+    nvim_treesitter_name = ts_utils_name
+    return ts_utils
+  end
+  local ok_plugin, nvim_treesitter_module = pcall(require, plugin_name)
+  if ok_plugin then
+    nvim_treesitter = nvim_treesitter_module
+    nvim_treesitter_name = plugin_name
+    return nvim_treesitter_module
+  end
+  nvim_treesitter = no_nvim_treesitter
+end
+
+local function node_at_cursor(buf, win, cursor, ts_utils)
+  if type(ts_utils) == "table" then
+    local get_node_at_cursor = ts_utils.get_node_at_cursor
+    if type(get_node_at_cursor) == "function" then
+      local window = win or 0
+      local ok_buf, window_buf = pcall(vim.api.nvim_win_get_buf, window)
+      local ok_cursor, window_cursor = pcall(vim.api.nvim_win_get_cursor, window)
+      local same_context = ok_buf
+        and ok_cursor
+        and window_buf == buf
+        and window_cursor[1] == cursor[1]
+        and window_cursor[2] == cursor[2]
+      if same_context then
+        local node = vim.F.npcall(get_node_at_cursor, window)
+        if node then
+          return node
+        end
+      end
+
+      local get_root_for_position = ts_utils.get_root_for_position
+      if type(get_root_for_position) ~= "function" then
+        local node = vim.F.npcall(get_node_at_cursor, window)
+        if node then
+          return node
+        end
+      else
+        local ok, parsers = pcall(require, "nvim-treesitter.parsers")
+        if ok then
+          local parser = vim.F.npcall(parsers.get_parser, buf)
+          local row, column = cursor[1] - 1, cursor[2]
+          local root = parser and vim.F.npcall(get_root_for_position, row, column, parser)
+          if root and type(root.named_descendant_for_range) == "function" then
+            return vim.F.npcall(root.named_descendant_for_range, root, row, column, row, column)
+          end
+        end
+      end
+    end
+  end
+
+  return vim.F.npcall(vim.treesitter.get_node, {
+    bufnr = buf,
+    pos = { cursor[1] - 1, cursor[2] },
+  })
+end
+
+local function query_nodes(buf, cursor, ts_utils)
+  if not ts_utils then
     return
   end
 
@@ -213,16 +303,20 @@ local function query_nodes(buf, cursor)
   return ok_nodes and matched_nodes or nil
 end
 
-function M.get_symbols(buf, _, cursor, max_depth)
+function M.get_symbols(buf, win, cursor, max_depth)
   local column = cursor[2]
   if column > 0 and vim.fn.mode():find("i", 1, true) then
     column = column - 1
   end
-  local node = vim.F.npcall(vim.treesitter.get_node, {
-    bufnr = buf,
-    pos = { cursor[1] - 1, column },
-  })
-  return symbols_from_node(node, buf, max_depth, query_nodes(buf, { cursor[1], column }))
+  local ts_utils = get_nvim_treesitter()
+  local position = { cursor[1], column }
+  local matched_nodes = query_nodes(buf, position, ts_utils)
+  local node = node_at_cursor(buf, win, position, ts_utils)
+  local result = symbols_from_node(node, buf, max_depth, matched_nodes)
+  if result[1] or not matched_nodes then
+    return result
+  end
+  return symbols_from_node(node, buf, max_depth)
 end
 
 function M.invalidate() end

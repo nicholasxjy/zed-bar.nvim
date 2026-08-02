@@ -15,7 +15,7 @@ highlight.
 - Current buffer path with its own highlight group
 - Cursor-aware symbol breadcrumbs with Nerd Font icons
 - LSP, Tree-sitter, and Markdown heading sources
-- Optional nvim-treesitter query support for more precise code-symbol matching
+- Optional nvim-treesitter node parsing for more precise code-symbol matching
 - Per-kind highlights for functions, classes, methods, variables, headings, control flow, and more
 - Asynchronous LSP requests with cancellation and debounced updates
 - No required plugin dependencies
@@ -104,8 +104,9 @@ Sources use fallback semantics: the first source that returns symbols at the cur
   `SymbolInformation` responses.
 - `treesitter`: follows the syntax-node ancestors at the cursor. It recognizes functions, methods,
   classes, declarations, variables, calls, control flow, JSX elements, mappings, and other common
-  node types. When `nvim-treesitter` and its `locals` query are available, it limits breadcrumbs to
-  semantic scope nodes; otherwise it uses the built-in ancestor matching.
+  node types. With the optional `nvim-treesitter` dependency, its node lookup is used when
+  available and its `locals` query can select semantic ancestors; otherwise the built-in node
+  lookup and ancestor matching remain the fallback.
 - `markdown`: builds the current heading hierarchy from ATX and Setext headings while ignoring
   headings inside fenced code blocks.
 
