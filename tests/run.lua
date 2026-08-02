@@ -225,12 +225,94 @@ local has_duplicate_parser, duplicate_parser =
 if has_duplicate_parser then
   duplicate_parser:parse()
   local duplicate_symbols = treesitter.get_symbols(duplicate_buf, 0, { 3, 6 }, 8)
+  local has_nvim_treesitter = pcall(require, "nvim-treesitter.ts_utils")
+  if not has_nvim_treesitter then
+    has_nvim_treesitter = pcall(require, "nvim-treesitter")
+  end
+  local has_locals_query = has_nvim_treesitter
+    and pcall(vim.treesitter.query.get, "lua", "locals")
+
   eq(
     vim.tbl_map(function(symbol)
       return symbol.name
     end, duplicate_symbols),
-    { "render", "current_symbols", "sources.get_symbols", "buf" },
+    has_locals_query and { "render" }
+      or { "render", "current_symbols", "sources.get_symbols", "buf" },
     "declaration parents do not repeat their more specific child"
+  )
+
+  local original_query_get = vim.treesitter.query.get
+  local original_ts_utils_loaded = package.loaded["nvim-treesitter.ts_utils"]
+  local original_ts_utils_preload = package.preload["nvim-treesitter.ts_utils"]
+
+  local original_get_node = vim.treesitter.get_node
+  local node = original_get_node({ bufnr = duplicate_buf, pos = { 2, 6 } })
+  package.loaded["nvim-treesitter.ts_utils"] = nil
+  package.preload["nvim-treesitter.ts_utils"] = function()
+    return {
+      get_node_at_cursor = function()
+        return node
+      end,
+    }
+  end
+  vim.treesitter.get_node = function()
+    error("native node lookup should not run when nvim-treesitter is available")
+  end
+  vim.treesitter.query.get = function(lang, name)
+    if lang == "lua" and name == "locals" then
+      return vim.treesitter.query.parse("lua", "(function_declaration) @local.scope")
+    end
+    return original_query_get(lang, name)
+  end
+  local query_symbols = treesitter.get_symbols(duplicate_buf, 0, { 3, 6 }, 8)
+  vim.treesitter.query.get = original_query_get
+  vim.treesitter.get_node = original_get_node
+  package.preload["nvim-treesitter.ts_utils"] = original_ts_utils_preload
+  package.loaded["nvim-treesitter.ts_utils"] = original_ts_utils_loaded
+  eq(
+    vim.tbl_map(function(symbol)
+      return symbol.name
+    end, query_symbols),
+    { "render" },
+    "nvim-treesitter node lookup and locals queries select semantic ancestors"
+  )
+
+  local original_get_parser = vim.treesitter.get_parser
+  local fallback_nvim_treesitter_loaded = package.loaded["nvim-treesitter"]
+  local fallback_nvim_treesitter_preload = package.preload["nvim-treesitter"]
+  local fallback_ts_utils_loaded = package.loaded["nvim-treesitter.ts_utils"]
+  local fallback_ts_utils_preload = package.preload["nvim-treesitter.ts_utils"]
+
+  package.loaded["nvim-treesitter.ts_utils"] = nil
+  package.loaded["nvim-treesitter"] = nil
+  package.preload["nvim-treesitter"] = function()
+    error("nvim-treesitter is unavailable")
+  end
+
+  package.preload["nvim-treesitter.ts_utils"] = function()
+    error("nvim-treesitter is unavailable")
+  end
+  local original_get_node = vim.treesitter.get_node
+  local node = original_get_node({ bufnr = duplicate_buf, pos = { 2, 6 } })
+  vim.treesitter.get_parser = function()
+    return nil
+  end
+  vim.treesitter.get_node = function()
+    return node
+  end
+  local nil_parser_symbols = treesitter.get_symbols(duplicate_buf, 0, { 3, 6 }, 8)
+  vim.treesitter.get_parser = original_get_parser
+  vim.treesitter.get_node = original_get_node
+  package.preload["nvim-treesitter.ts_utils"] = fallback_ts_utils_preload
+  package.loaded["nvim-treesitter.ts_utils"] = fallback_ts_utils_loaded
+  package.preload["nvim-treesitter"] = fallback_nvim_treesitter_preload
+  package.loaded["nvim-treesitter"] = fallback_nvim_treesitter_loaded
+  eq(
+    vim.tbl_map(function(symbol)
+      return symbol.name
+    end, nil_parser_symbols),
+    { "render", "current_symbols", "sources.get_symbols", "buf" },
+    "missing nvim-treesitter falls back to ancestor matching"
   )
 end
 
