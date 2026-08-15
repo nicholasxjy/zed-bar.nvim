@@ -22,7 +22,7 @@ highlight.
 
 ## Requirements
 
-- Neovim 0.11+
+- Neovim 0.12+
 - A language server with `textDocument/documentSymbol` support or a Tree-sitter parser for code
   buffers (Markdown headings work without either)
 - A Nerd Font for symbol icons

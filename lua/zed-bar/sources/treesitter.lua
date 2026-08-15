@@ -72,19 +72,99 @@ local function node_text(node, buf)
   return vim.trim(text:gsub("%s+", " "))
 end
 
-local name_pattern = [[[#~!@*&.]*\k\+!\?\%\(\%\(\s\+\|:\+\|->\|-\+\|\.\+\)[#~!@*&.]*\k\+!\?\)*]]
-local name_regex = vim.regex(name_pattern)
-
 local function truncate(name)
   return #name <= 60 and name or vim.fn.strcharpart(name, 0, 60)
 end
 
+local function is_identifier_byte(byte)
+  return (byte >= 48 and byte <= 57)
+    or (byte >= 65 and byte <= 90)
+    or (byte >= 97 and byte <= 122)
+    or byte == 95
+    or byte >= 128
+end
+
+local function is_name_prefix_byte(byte)
+  return byte == 35 or byte == 126 or byte == 33 or byte == 64
+    or byte == 42 or byte == 38 or byte == 46
+end
+
+local function separator_end(text, index)
+  local length = #text
+  if index > length then
+    return nil
+  end
+
+  local byte = text:byte(index)
+  if byte == 32 or (byte >= 9 and byte <= 13) then
+    repeat
+      index = index + 1
+    until index > length
+      or not (text:byte(index) == 32 or (text:byte(index) >= 9 and text:byte(index) <= 13))
+    return index
+  end
+  if byte == 58 then
+    repeat
+      index = index + 1
+    until index > length or text:byte(index) ~= 58
+    return index
+  end
+  if byte == 45 then
+    if index + 1 <= length and text:byte(index + 1) == 62 then
+      return index + 2
+    end
+    repeat
+      index = index + 1
+    until index > length or text:byte(index) ~= 45
+    return index
+  end
+  if byte == 46 then
+    repeat
+      index = index + 1
+    until index > length or text:byte(index) ~= 46
+    return index
+  end
+end
+
 local function extract_name(text)
-  local start, finish = name_regex:match_str(text)
-  if not start then
+  local length = #text
+  local index = 1
+  while index <= length and not is_identifier_byte(text:byte(index)) do
+    index = index + 1
+  end
+  if index > length then
     return ""
   end
-  local name = text:sub(start + 1, finish)
+
+  local start = index
+  while start > 1 and is_name_prefix_byte(text:byte(start - 1)) do
+    start = start - 1
+  end
+
+  local finish = index
+  while true do
+    repeat
+      index = index + 1
+    until index > length or not is_identifier_byte(text:byte(index))
+    if index <= length and text:byte(index) == 33 then
+      index = index + 1
+    end
+    finish = index
+
+    local candidate = separator_end(text, index)
+    if not candidate then
+      break
+    end
+    while candidate <= length and is_name_prefix_byte(text:byte(candidate)) do
+      candidate = candidate + 1
+    end
+    if candidate > length or not is_identifier_byte(text:byte(candidate)) then
+      break
+    end
+    index = candidate
+  end
+
+  local name = text:sub(start, finish - 1)
   return truncate(name)
 end
 
@@ -156,13 +236,17 @@ end
 
 local function symbols_from_node(node, buf, max_depth, matched_nodes)
   local result = {}
+  local previous_canonical
   while node and #result < max_depth do
     local node_kind = kind(node:type())
     if node_kind and (not matched_nodes or matched_nodes[node:id()]) then
       local name = short_name(node, buf, node_kind)
-      local previous = result[#result]
-      if name ~= "" and (not previous or canonical_name(previous.name) ~= canonical_name(name)) then
-        result[#result + 1] = { name = name, kind = node_kind }
+      if name ~= "" then
+        local canonical = canonical_name(name)
+        if not previous_canonical or previous_canonical ~= canonical then
+          result[#result + 1] = { name = name, kind = node_kind }
+          previous_canonical = canonical
+        end
       end
     end
     node = node:parent()
@@ -305,7 +389,7 @@ end
 
 function M.get_symbols(buf, win, cursor, max_depth)
   local column = cursor[2]
-  if column > 0 and vim.fn.mode():find("i", 1, true) then
+  if column > 0 and vim.api.nvim_get_mode().mode:find("i", 1, true) then
     column = column - 1
   end
   local ts_utils = get_nvim_treesitter()
