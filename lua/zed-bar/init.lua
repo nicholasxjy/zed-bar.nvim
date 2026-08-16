@@ -62,13 +62,15 @@ local function get_path(buf, name)
   return value
 end
 
-local function position(win, encoding)
-  local ok, params = pcall(vim.lsp.util.make_position_params, win, encoding or "utf-16")
-  if ok then
-    return params.position
+local function position(buf, cursor, encoding)
+  local line = vim.api.nvim_buf_get_lines(buf, cursor[1] - 1, cursor[1], true)[1]
+  if not line then
+    return { line = 0, character = 0 }
   end
-  local cursor = vim.api.nvim_win_get_cursor(win)
-  return { line = cursor[1] - 1, character = cursor[2] }
+  return {
+    line = cursor[1] - 1,
+    character = vim.str_utfindex(line, encoding or "utf-16", cursor[2], false),
+  }
 end
 
 local function is_disabled(buf)
@@ -94,6 +96,8 @@ local function render(win)
   local changedtick = vim.api.nvim_buf_get_changedtick(buf)
   local name = vim.api.nvim_buf_get_name(buf)
   local filetype = vim.bo[buf].filetype
+  local current_mode = vim.api.nvim_get_mode().mode
+  local current_winbar = vim.wo[win].winbar
   local can_cache = type(config.options.path) ~= "function"
     and config.options.sources == config.defaults.sources
   local previous_render = render_cache[win]
@@ -107,8 +111,9 @@ local function render(win)
     and previous_render.filetype == filetype
     and previous_render.line == cursor[1]
     and previous_render.lsp_symbols == lsp_symbols_table
+    and previous_render.mode == current_mode
     and previous_render.name == name
-    and previous_render.value == vim.wo[win].winbar
+    and previous_render.value == current_winbar
   then
     return false
   end
@@ -117,7 +122,7 @@ local function render(win)
   local lsp_symbols = {}
   if state and state.symbols then
     lsp_symbols =
-      symbols.path(state.symbols, position(win, state.encoding), config.options.max_depth)
+      symbols.path(state.symbols, position(buf, cursor, state.encoding), config.options.max_depth)
   end
 
   local source_names = config.options.sources
@@ -131,11 +136,16 @@ local function render(win)
     max_depth = config.options.max_depth,
     lsp_symbols = lsp_symbols,
   })
+  local separator_part = "%#ZedBarSeparator#"
+    .. statusline_escape(config.options.separator)
+    .. "%*"
   for _, symbol in ipairs(current_symbols) do
     local kind = symbols.kind(symbol)
-    table.insert(parts, component(config.options.separator, "ZedBarSeparator"))
-    table.insert(parts, component(config.options.kinds[kind] or "", "ZedBarIconKind" .. kind))
-    table.insert(parts, component(symbol.name, "ZedBarKind" .. kind))
+    parts[#parts + 1] = separator_part
+    parts[#parts + 1] = "%#" .. "ZedBarIconKind" .. kind .. "#"
+      .. statusline_escape(config.options.kinds[kind] or "") .. "%*"
+    parts[#parts + 1] = "%#" .. "ZedBarKind" .. kind .. "#"
+      .. statusline_escape(symbol.name) .. "%*"
   end
 
   local padding = config.options.padding
@@ -150,6 +160,7 @@ local function render(win)
     current_render.filetype = filetype
     current_render.line = cursor[1]
     current_render.lsp_symbols = lsp_symbols_table
+    current_render.mode = current_mode
     current_render.name = name
     current_render.value = value
     render_cache[win] = current_render
