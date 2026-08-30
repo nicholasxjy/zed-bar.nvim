@@ -81,7 +81,7 @@ local function is_enabled(buf, win)
   return not is_disabled(buf) and config.options.enabled(buf, win)
 end
 
-local function render(win)
+local function render(win, path_only)
   if not vim.api.nvim_win_is_valid(win) then
     return
   end
@@ -91,10 +91,19 @@ local function render(win)
     return set_winbar(win, "")
   end
 
+  local name = vim.api.nvim_buf_get_name(buf)
+  if path_only then
+    local padding = config.options.padding
+    local value = component(string.rep(" ", padding.left), "ZedBarNormal")
+      .. component(get_path(buf, name), "ZedBarFile")
+      .. component(string.rep(" ", padding.right), "ZedBarNormal")
+    render_cache[win] = nil
+    return set_winbar(win, value)
+  end
+
   local state = cache[buf]
   local cursor = vim.api.nvim_win_get_cursor(win)
   local changedtick = vim.api.nvim_buf_get_changedtick(buf)
-  local name = vim.api.nvim_buf_get_name(buf)
   local filetype = vim.bo[buf].filetype
   local current_mode = vim.api.nvim_get_mode().mode
   local current_winbar = vim.wo[win].winbar
@@ -170,9 +179,9 @@ local function render(win)
   return set_winbar(win, value)
 end
 
-local function render_buffer(buf)
+local function render_buffer(buf, path_only)
   for _, win in ipairs(vim.fn.win_findbuf(buf)) do
-    render(win)
+    render(win, path_only)
   end
 end
 
@@ -299,10 +308,33 @@ function M.setup(opts)
   render_cache = {}
 
   vim.api.nvim_clear_autocmds({ group = group })
-  vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile", "BufEnter" }, {
+  vim.api.nvim_create_autocmd("BufReadPre", {
+    group = group,
+    callback = function(args)
+      render_buffer(args.buf, true)
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "BufNewFile", "BufEnter" }, {
     group = group,
     callback = function(args)
       render_buffer(args.buf)
+    end,
+  })
+  vim.api.nvim_create_autocmd("BufReadPost", {
+    group = group,
+    callback = function(args)
+      vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(args.buf) then
+          return
+        end
+        invalidate_render_buffer(args.buf)
+        sources.invalidate(args.buf)
+        local ok, parser = pcall(vim.treesitter.get_parser, args.buf)
+        if ok and parser then
+          pcall(parser.parse, parser)
+        end
+        request_symbols(args.buf)
+      end)
     end,
   })
   vim.api.nvim_create_autocmd({ "BufWinEnter", "WinEnter" }, {

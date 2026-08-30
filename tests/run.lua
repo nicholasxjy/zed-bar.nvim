@@ -443,4 +443,30 @@ zed_bar._render(0)
 zed_bar._render(0)
 eq(custom_path_calls, calls_after_setup + 2, "custom path functions are never render-cached")
 
+local autoread_path = vim.fn.tempname() .. ".lua"
+vim.fn.writefile({ "function old()", "  return 1", "end" }, autoread_path)
+vim.cmd.edit(vim.fn.fnameescape(autoread_path))
+vim.bo.filetype = "lua"
+local has_autoread_parser, autoread_parser = pcall(vim.treesitter.get_parser, 0, "lua")
+if has_autoread_parser then
+  autoread_parser:parse()
+  vim.api.nvim_win_set_cursor(0, { 3, 4 })
+  zed_bar._render(0)
+  vim.fn.writefile({ "local x = 1" }, autoread_path)
+  local checktime_ok, checktime_error = pcall(vim.cmd.checktime)
+  assert(
+    checktime_ok,
+    "checktime should not fail while refreshing an externally changed file: "
+      .. tostring(checktime_error)
+  )
+  eq(
+    vim.api.nvim_buf_get_lines(0, 0, -1, false),
+    { "local x = 1" },
+    "checktime loads the externally changed file"
+  )
+  vim.wait(100)
+  assert(not vim.wo.winbar:find("old", 1, true), "checktime refreshes the Tree-sitter winbar")
+end
+vim.fn.delete(autoread_path)
+
 print("zed-bar.nvim tests passed")
