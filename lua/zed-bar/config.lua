@@ -14,7 +14,7 @@ M.defaults = {
   kinds = kinds.icons,
   disabled_filetypes = {},
   sources = function(buf)
-    if vim.bo[buf].filetype == "markdown" then
+    if vim.api.nvim_get_option_value("filetype", { buf = buf }) == "markdown" then
       return markdown_sources
     end
     return code_sources
@@ -22,7 +22,7 @@ M.defaults = {
   enabled = function(buf, win)
     return vim.api.nvim_buf_is_valid(buf)
       and vim.api.nvim_win_is_valid(win)
-      and vim.bo[buf].buftype == ""
+      and vim.api.nvim_get_option_value("buftype", { buf = buf }) == ""
       and vim.api.nvim_buf_get_name(buf) ~= ""
   end,
 }

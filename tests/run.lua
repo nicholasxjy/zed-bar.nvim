@@ -211,6 +211,73 @@ if has_lua_parser then
   eq(lua_symbols[1].kind, "Variable", "the more specific child symbol is kept")
 end
 
+if has_parser then
+  local class_buf = vim.api.nvim_create_buf(true, false)
+  vim.bo[class_buf].filetype = "typescript"
+  vim.api.nvim_buf_set_lines(class_buf, 0, -1, false, {
+    "class Foo {",
+    "  bar = 1",
+    "",
+    "  baz() {}",
+    "}",
+    "const App = () => {",
+    "  const first = 1",
+    "",
+    "}",
+  })
+  local function names_at(row, column)
+    return vim.tbl_map(function(symbol)
+      return symbol.name
+    end, treesitter.get_symbols(class_buf, 0, { row, column }, 8))
+  end
+  eq(names_at(3, 0), { "Foo" }, "anonymous class bodies are not named after their first member")
+  eq(names_at(8, 0), { "App" }, "anonymous arrow functions are not named after their body")
+
+  vim.api.nvim_buf_set_lines(class_buf, 0, 1, false, { "class Renamed {" })
+  eq(names_at(3, 0), { "Renamed" }, "a stale Tree-sitter tree is re-parsed after an edit")
+  vim.api.nvim_buf_set_lines(class_buf, 1, -1, false, {})
+  eq(names_at(1, 0), { "Renamed" }, "lookups stay safe after lines covered by old nodes are deleted")
+end
+
+local fence_buf = vim.api.nvim_create_buf(false, true)
+vim.bo[fence_buf].filetype = "markdown"
+vim.api.nvim_buf_set_lines(fence_buf, 0, -1, false, {
+  "# Top",
+  "````",
+  "```lua",
+  "# not a heading",
+  "```",
+  "````",
+  "## Real",
+  "body",
+})
+eq(
+  vim.tbl_map(function(symbol)
+    return symbol.name
+  end, sources.markdown.get_symbols(fence_buf, 0, { 8, 0 }, 8)),
+  { "Top", "Real" },
+  "only a matching fence without an info string closes a code block"
+)
+
+local incremental_buf = vim.api.nvim_create_buf(false, true)
+vim.bo[incremental_buf].filetype = "markdown"
+local incremental_lines = {}
+for index = 1, 600 do
+  incremental_lines[index] = index % 100 == 1 and ("# Part " .. index) or "text"
+end
+vim.api.nvim_buf_set_lines(incremental_buf, 0, -1, false, incremental_lines)
+sources.markdown.get_symbols(incremental_buf, 0, { 600, 0 }, 8)
+vim.api.nvim_buf_set_lines(incremental_buf, 450, 451, false, { "## Inserted" })
+vim.api.nvim_buf_set_lines(incremental_buf, 10, 12, false, {})
+local incremental_symbols = sources.markdown.get_symbols(incremental_buf, 0, { 470, 0 }, 8)
+sources.markdown.invalidate(incremental_buf)
+eq(
+  incremental_symbols,
+  sources.markdown.get_symbols(incremental_buf, 0, { 470, 0 }, 8),
+  "incremental Markdown parsing matches a full parse after edits"
+)
+eq(incremental_symbols[2].name, "Inserted", "incremental Markdown parsing sees new headings")
+
 local duplicate_buf = vim.api.nvim_create_buf(true, false)
 vim.bo[duplicate_buf].filetype = "lua"
 vim.api.nvim_buf_set_lines(duplicate_buf, 0, -1, false, {
@@ -401,6 +468,30 @@ evaluated = vim.api.nvim_eval_statusline(vim.wo.winbar, {
   use_winbar = true,
 })
 assert(evaluated.str:find("fn setOpen", 1, true), "symbol kind icons can be configured")
+
+local replacement_client = { offset_encoding = "utf-16" }
+function replacement_client:request(_, _, callback)
+  next_request_id = next_request_id + 1
+  callbacks[next_request_id] = callback
+  return true, next_request_id
+end
+function replacement_client:cancel_request() end
+vim.lsp.get_clients = function()
+  return { replacement_client }
+end
+local requests_before_detach = next_request_id
+vim.api.nvim_exec_autocmds("LspDetach", { group = "ZedBar", buffer = 0 })
+vim.wait(100, function()
+  return next_request_id > requests_before_detach
+end)
+eq(
+  next_request_id,
+  requests_before_detach + 1,
+  "a remaining LSP client re-requests symbols after another client detaches"
+)
+vim.lsp.get_clients = function()
+  return { client }
+end
 
 vim.bo.filetype = "lua"
 zed_bar.setup({ disabled_filetypes = { "lua" } })

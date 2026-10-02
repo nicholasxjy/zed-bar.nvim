@@ -61,11 +61,28 @@ local function kind(node_type)
   kind_cache[node_type] = no_kind
 end
 
+-- Names come from the start of a node, so large ancestors (function bodies, whole components)
+-- are read only up to these limits instead of copying their entire text on every render.
+local max_text_rows = 8
+local max_text_bytes = 512
+
 local function node_text(node, buf)
   if not node then
     return ""
   end
-  local text = vim.treesitter.get_node_text(node, buf)
+  local start_row, start_column, end_row, end_column = node:range()
+  if end_row - start_row >= max_text_rows then
+    end_row, end_column = start_row + max_text_rows, 0
+  end
+  local ok, lines =
+    pcall(vim.api.nvim_buf_get_text, buf, start_row, start_column, end_row, end_column, {})
+  if not ok then
+    return ""
+  end
+  local text = table.concat(lines, "\n")
+  if #text > max_text_bytes then
+    text = text:sub(1, max_text_bytes)
+  end
   if not text:find("%s") then
     return text
   end
@@ -130,6 +147,11 @@ local function extract_name(text)
   local length = #text
   local index = 1
   while index <= length and not is_identifier_byte(text:byte(index)) do
+    -- Reaching "{" before any identifier means an anonymous block (class body, statement block,
+    -- table, `() => {`); naming it after its first inner identifier would be misleading.
+    if text:byte(index) == 123 then
+      return ""
+    end
     index = index + 1
   end
   if index > length then
@@ -348,15 +370,7 @@ local function node_at_cursor(buf, win, cursor, ts_utils)
   })
 end
 
-local function query_nodes(buf, cursor, ts_utils)
-  if not ts_utils then
-    return
-  end
-
-  local ok, parser = pcall(vim.treesitter.get_parser, buf)
-  if not ok or not parser then
-    return
-  end
+local function query_nodes(buf, cursor, parser)
   local ok_lang, lang = pcall(parser.lang, parser)
   local ok_query, query = pcall(vim.treesitter.query.get, lang, "locals")
   if not ok_lang or not ok_query or not query then
@@ -364,8 +378,8 @@ local function query_nodes(buf, cursor, ts_utils)
   end
 
   local ok_nodes, matched_nodes = pcall(function()
-    local trees = parser:parse()
-    local root = trees[1] and trees[1]:root()
+    local tree = parser:trees()[1]
+    local root = tree and tree:root()
     if not root then
       return
     end
@@ -387,14 +401,29 @@ local function query_nodes(buf, cursor, ts_utils)
   return ok_nodes and matched_nodes or nil
 end
 
+-- `vim.treesitter.get_node` never parses, so after an edit (or with async highlighting, or no
+-- highlighter at all) it would return nodes from an outdated tree whose ranges no longer match
+-- the buffer. Re-parse the root tree only when it is stale; the parse is incremental.
+local function current_parser(buf)
+  local ok, parser = pcall(vim.treesitter.get_parser, buf)
+  if not ok or not parser then
+    return
+  end
+  if not parser:is_valid(true) then
+    pcall(parser.parse, parser)
+  end
+  return parser
+end
+
 function M.get_symbols(buf, win, cursor, max_depth)
   local column = cursor[2]
   if column > 0 and vim.api.nvim_get_mode().mode:find("i", 1, true) then
     column = column - 1
   end
   local ts_utils = get_nvim_treesitter()
+  local parser = current_parser(buf)
   local position = { cursor[1], column }
-  local matched_nodes = query_nodes(buf, position, ts_utils)
+  local matched_nodes = ts_utils and parser and query_nodes(buf, position, parser)
   local node = node_at_cursor(buf, win, position, ts_utils)
   local result = symbols_from_node(node, buf, max_depth, matched_nodes)
   if result[1] or not matched_nodes then
