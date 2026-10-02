@@ -148,8 +148,11 @@ automatically. The winbar row is reserved before the buffer is displayed, and id
 are skipped to avoid first-entry flicker and unnecessary redraws.
 
 Hot paths use a compiled Tree-sitter name matcher, cached node-kind lookups, cached buffer paths,
-and binary search over sorted LSP symbols. Idle debounce timers and unloaded-buffer caches are
-released automatically.
+pre-rendered separator/icon/highlight segments, and binary search over sorted LSP symbols.
+Tree-sitter names are read from a bounded prefix of each node, so large ancestors such as whole
+components cost the same as small ones, and an outdated tree is re-parsed incrementally before it
+is used. Markdown headings are parsed incrementally from the nearest checkpoint above an edit.
+Idle debounce timers and unloaded-buffer caches are released automatically.
 
 ## Testing
 

@@ -10,9 +10,12 @@ local cache = {}
 local path_cache = {}
 local render_cache = {}
 local window_timers = {}
+local window_callbacks = {}
 local symbol_timers = {}
 local symbol_timer_generations = {}
 local timer_generation = 0
+-- Values derived from `config.options` once per `setup()` instead of on every render.
+local compiled = {}
 
 local function statusline_escape(value)
   return value:gsub("%%", "%%%%")
@@ -22,12 +25,49 @@ local function component(text, highlight)
   return "%#" .. highlight .. "#" .. statusline_escape(text) .. "%*"
 end
 
+local function get_winbar(win)
+  return vim.api.nvim_get_option_value("winbar", { win = win })
+end
+
 local function set_winbar(win, value)
-  if vim.wo[win].winbar == value then
+  if get_winbar(win) == value then
     return false
   end
-  vim.wo[win].winbar = value
+  vim.api.nvim_set_option_value("winbar", value, { win = win })
   return true
+end
+
+local function compile_options()
+  local options = config.options
+  local disabled = {}
+  for _, filetype in ipairs(options.disabled_filetypes) do
+    disabled[filetype] = true
+  end
+  compiled = {
+    disabled = disabled,
+    -- A user `path` or `sources` function may depend on state outside the render cache key.
+    can_cache = type(options.path) ~= "function"
+      and (type(options.sources) == "table" or options.sources == config.defaults.sources),
+    left = component(string.rep(" ", options.padding.left), "ZedBarNormal"),
+    right = component(string.rep(" ", options.padding.right), "ZedBarNormal"),
+    separator = component(options.separator, "ZedBarSeparator"),
+    kind_prefixes = {},
+  }
+end
+compile_options()
+
+-- Separator, icon and name highlight for a symbol kind; only the symbol name varies per render.
+local function kind_prefix(kind)
+  local prefix = compiled.kind_prefixes[kind]
+  if not prefix then
+    prefix = compiled.separator
+      .. component(config.options.kinds[kind] or "", "ZedBarIconKind" .. kind)
+      .. "%#ZedBarKind"
+      .. kind
+      .. "#"
+    compiled.kind_prefixes[kind] = prefix
+  end
+  return prefix
 end
 
 local function close_timer(timer)
@@ -40,25 +80,18 @@ local function close_timer(timer)
   end
 end
 
+-- `path_cache` is reset by `setup()` and `DirChanged`, so it only has to be keyed by name.
 local function get_path(buf, name)
-  if config.options.path == "basename" then
-    local cached = path_cache[buf]
-    if cached and cached.name == name and cached.mode == "basename" then
-      return cached.value
-    end
-    local value = vim.fs.basename(name)
-    path_cache[buf] = { mode = "basename", name = name, value = value }
-    return value
-  end
-  if type(config.options.path) == "function" then
-    return config.options.path(buf, name)
+  local path = config.options.path
+  if type(path) == "function" then
+    return path(buf, name)
   end
   local cached = path_cache[buf]
-  if cached and cached.name == name and cached.mode == "relative" then
+  if cached and cached.name == name then
     return cached.value
   end
-  local value = vim.fn.fnamemodify(name, ":~:.")
-  path_cache[buf] = { mode = "relative", name = name, value = value }
+  local value = path == "basename" and vim.fs.basename(name) or vim.fn.fnamemodify(name, ":~:.")
+  path_cache[buf] = { name = name, value = value }
   return value
 end
 
@@ -74,7 +107,7 @@ local function position(buf, cursor, encoding)
 end
 
 local function is_disabled(buf)
-  return vim.list_contains(config.options.disabled_filetypes, vim.bo[buf].filetype)
+  return compiled.disabled[vim.api.nvim_get_option_value("filetype", { buf = buf })] == true
 end
 
 local function is_enabled(buf, win)
@@ -93,10 +126,7 @@ local function render(win, path_only)
 
   local name = vim.api.nvim_buf_get_name(buf)
   if path_only then
-    local padding = config.options.padding
-    local value = component(string.rep(" ", padding.left), "ZedBarNormal")
-      .. component(get_path(buf, name), "ZedBarFile")
-      .. component(string.rep(" ", padding.right), "ZedBarNormal")
+    local value = compiled.left .. component(get_path(buf, name), "ZedBarFile") .. compiled.right
     render_cache[win] = nil
     return set_winbar(win, value)
   end
@@ -104,11 +134,10 @@ local function render(win, path_only)
   local state = cache[buf]
   local cursor = vim.api.nvim_win_get_cursor(win)
   local changedtick = vim.api.nvim_buf_get_changedtick(buf)
-  local filetype = vim.bo[buf].filetype
+  local filetype = vim.api.nvim_get_option_value("filetype", { buf = buf })
   local current_mode = vim.api.nvim_get_mode().mode
-  local current_winbar = vim.wo[win].winbar
-  local can_cache = type(config.options.path) ~= "function"
-    and config.options.sources == config.defaults.sources
+  local current_winbar = get_winbar(win)
+  local can_cache = compiled.can_cache
   local previous_render = render_cache[win]
   local lsp_symbols_table = state and state.symbols or nil
   if
@@ -127,11 +156,16 @@ local function render(win, path_only)
     return false
   end
 
-  local parts = { component(get_path(buf, name), "ZedBarFile") }
-  local lsp_symbols = {}
-  if state and state.symbols then
-    lsp_symbols =
-      symbols.path(state.symbols, position(buf, cursor, state.encoding), config.options.max_depth)
+  local parts = { compiled.left, component(get_path(buf, name), "ZedBarFile") }
+  local function lsp_symbols()
+    if not lsp_symbols_table or not lsp_symbols_table[1] then
+      return {}
+    end
+    return symbols.path(
+      lsp_symbols_table,
+      position(buf, cursor, state.encoding),
+      config.options.max_depth
+    )
   end
 
   local source_names = config.options.sources
@@ -145,22 +179,14 @@ local function render(win, path_only)
     max_depth = config.options.max_depth,
     lsp_symbols = lsp_symbols,
   })
-  local separator_part = "%#ZedBarSeparator#"
-    .. statusline_escape(config.options.separator)
-    .. "%*"
   for _, symbol in ipairs(current_symbols) do
-    local kind = symbols.kind(symbol)
-    parts[#parts + 1] = separator_part
-    parts[#parts + 1] = "%#" .. "ZedBarIconKind" .. kind .. "#"
-      .. statusline_escape(config.options.kinds[kind] or "") .. "%*"
-    parts[#parts + 1] = "%#" .. "ZedBarKind" .. kind .. "#"
-      .. statusline_escape(symbol.name) .. "%*"
+    parts[#parts + 1] = kind_prefix(symbols.kind(symbol))
+    parts[#parts + 1] = statusline_escape(symbol.name)
+    parts[#parts + 1] = "%*"
   end
+  parts[#parts + 1] = compiled.right
 
-  local padding = config.options.padding
-  local value = component(string.rep(" ", padding.left), "ZedBarNormal")
-    .. table.concat(parts)
-    .. component(string.rep(" ", padding.right), "ZedBarNormal")
+  local value = table.concat(parts)
   if can_cache then
     local current_render = previous_render or {}
     current_render.buf = buf
@@ -192,18 +218,16 @@ local function invalidate_render_buffer(buf)
 end
 
 local function schedule_render(win)
-  if window_timers[win] then
-    window_timers[win]:stop()
-  else
-    window_timers[win] = vim.uv.new_timer()
-  end
-  window_timers[win]:start(
-    config.options.update_debounce,
-    0,
-    vim.schedule_wrap(function()
+  local timer = window_timers[win]
+  if not timer then
+    timer = vim.uv.new_timer()
+    window_timers[win] = timer
+    window_callbacks[win] = vim.schedule_wrap(function()
       render(win)
     end)
-  )
+  end
+  -- Starting an active timer restarts it, which is the debounce.
+  timer:start(config.options.update_debounce, 0, window_callbacks[win])
 end
 
 local function supporting_client(buf)
@@ -269,8 +293,9 @@ local function schedule_symbols(buf)
       symbol_timers[buf] = nil
       symbol_timer_generations[buf] = nil
       close_timer(timer)
+      -- Source caches follow `changedtick` themselves; dropping them here would force the
+      -- Markdown source to re-parse the whole buffer after every edit.
       invalidate_render_buffer(buf)
-      sources.invalidate(buf)
       request_symbols(buf)
     end)
   )
@@ -300,9 +325,11 @@ function M.setup(opts)
     close_timer(timer)
   end
   window_timers = {}
+  window_callbacks = {}
   symbol_timers = {}
   symbol_timer_generations = {}
   config.setup(opts)
+  compile_options()
   kinds.setup_highlights(config.options.kinds)
   path_cache = {}
   render_cache = {}
@@ -327,12 +354,9 @@ function M.setup(opts)
         if not vim.api.nvim_buf_is_valid(args.buf) then
           return
         end
+        -- The Tree-sitter source re-parses a stale tree itself before looking up nodes.
         invalidate_render_buffer(args.buf)
         sources.invalidate(args.buf)
-        local ok, parser = pcall(vim.treesitter.get_parser, args.buf)
-        if ok and parser then
-          pcall(parser.parse, parser)
-        end
         request_symbols(args.buf)
       end)
     end,
@@ -387,9 +411,16 @@ function M.setup(opts)
     group = group,
     callback = function(args)
       vim.schedule(function()
-        if not supporting_client(args.buf) then
+        if not vim.api.nvim_buf_is_valid(args.buf) then
+          return
+        end
+        local client = supporting_client(args.buf)
+        if not client then
           cleanup(args.buf)
           render_buffer(args.buf)
+        elseif not cache[args.buf] or cache[args.buf].client ~= client then
+          -- Another client can still provide symbols; replace the detached client's results.
+          request_symbols(args.buf)
         end
       end)
     end,
@@ -407,6 +438,7 @@ function M.setup(opts)
       if win and window_timers[win] then
         close_timer(window_timers[win])
         window_timers[win] = nil
+        window_callbacks[win] = nil
       end
       if win then
         render_cache[win] = nil
