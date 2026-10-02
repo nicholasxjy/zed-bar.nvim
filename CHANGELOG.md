@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [v0.0.6] - 2026-10-02
+
 ### Performance
 
 - Read Tree-sitter node names from a bounded prefix instead of the full node text (a cursor
@@ -23,6 +25,13 @@ All notable changes to this project are documented in this file.
 - Only close Markdown code fences with a matching fence of at least the same length and no info
   string
 - Re-request symbols from a remaining LSP client when another client detaches
+
+## [v0.0.5] - 2026-08-30
+
+### Bug Fixes
+
+- Avoid stale Tree-sitter nodes during autoread
+  ([#5](https://github.com/nicholasxjy/zed-bar.nvim/pull/5))
 
 ## [v0.0.4] - 2026-08-16
 
