@@ -399,10 +399,13 @@ zed_bar._render(0)
 eq(zed_bar._render(0), false, "unchanged winbar content does not trigger another assignment")
 local winbar = vim.wo.winbar
 assert(
-  winbar:find("src/components/CNUserModal/index.tsx", 1, true),
+  vim.api
+    .nvim_eval_statusline(winbar, { winid = 0, use_winbar = true }).str
+    :find("src/components/CNUserModal/index.tsx", 1, true),
   "relative buffer path is rendered"
 )
-assert(winbar:find("ZedBarFile", 1, true), "file path uses its own highlight")
+assert(winbar:find("%#ZedBarDir#src/components/CNUserModal/%*", 1, true), "directory is dimmed")
+assert(winbar:find("%#ZedBarFile#index.tsx%*", 1, true), "file name uses its own highlight")
 
 vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.fn["repeat"]({ "" }, 10))
 vim.api.nvim_win_set_cursor(0, { 7, 0 })
@@ -452,7 +455,7 @@ local evaluated = vim.api.nvim_eval_statusline(winbar, {
 })
 eq(
   evaluated.str,
-  " src/components/CNUserModal/index.tsx ›  CNUserModal › 󰊕 setOpen ",
+  " src/components/CNUserModal/index.tsx ● ›  CNUserModal › 󰊕 setOpen ",
   "rendered layout matches the approved component order and spacing"
 )
 
@@ -519,7 +522,12 @@ vim.api.nvim_buf_set_name(first_enter_buf, root .. "/src/first-enter.lua")
 vim.api.nvim_win_set_buf(0, first_enter_buf)
 vim.wo.winbar = ""
 vim.api.nvim_exec_autocmds("BufReadPre", { buffer = first_enter_buf })
-assert(vim.wo.winbar:find("src/first-enter.lua", 1, true), "BufReadPre reserves the winbar row")
+assert(
+  vim.api
+    .nvim_eval_statusline(vim.wo.winbar, { winid = 0, use_winbar = true }).str
+    :find("src/first-enter.lua", 1, true),
+  "BufReadPre reserves the winbar row"
+)
 
 local custom_path_calls = 0
 zed_bar.setup({
@@ -559,5 +567,374 @@ if has_autoread_parser then
   assert(not vim.wo.winbar:find("old", 1, true), "checktime refreshes the Tree-sitter winbar")
 end
 vim.fn.delete(autoread_path)
+
+vim.cmd.runtime("plugin/zed-bar.lua")
+local icons = require("zed-bar.kinds").icons
+
+local function names(list)
+  return vim.tbl_map(function(symbol)
+    return symbol.name
+  end, list)
+end
+
+local scope_buf = vim.api.nvim_create_buf(true, false)
+vim.bo[scope_buf].filetype = "lua"
+vim.api.nvim_buf_set_lines(scope_buf, 0, -1, false, {
+  "local function request_symbols(buf)",
+  "  local _, request_id = client:request(",
+  "    'textDocument/documentSymbol',",
+  "    {},",
+  "    function(err, result)",
+  "      if not err then",
+  "        state.symbols = result",
+  "      end",
+  "    end",
+  "  )",
+  "  local count = 1",
+  "end",
+  "describe('x', function()",
+  "  it('works', function()",
+  "    assert(true)",
+  "  end)",
+  "end)",
+})
+local has_scope_parser, scope_parser = pcall(vim.treesitter.get_parser, scope_buf, "lua")
+if has_scope_parser then
+  scope_parser:parse()
+  eq(
+    names(treesitter.get_symbols(scope_buf, 0, { 7, 10 }, 8, "scope")),
+    { "request_symbols", "client:request" },
+    "scope detail names an anonymous callback after its call and drops locals and control flow"
+  )
+  eq(
+    names(treesitter.get_symbols(scope_buf, 0, { 11, 10 }, 8, "scope")),
+    { "request_symbols" },
+    "scope detail drops bindings that do not hold a scope"
+  )
+  eq(
+    names(treesitter.get_symbols(scope_buf, 0, { 15, 4 }, 8, "scope")),
+    { "describe", "it" },
+    "scope detail names test blocks after their calls"
+  )
+  assert(
+    vim.iter(treesitter.get_symbols(scope_buf, 0, { 7, 10 }, 8, "full")):any(function(symbol)
+      return symbol.kind == "IfStatement"
+    end),
+    "full detail keeps control flow"
+  )
+  local first_scope = treesitter.get_symbols(scope_buf, 0, { 7, 10 }, 8, "scope")[1]
+  eq({ first_scope.row, first_scope.col }, { 0, 0 }, "Tree-sitter symbols carry their start")
+end
+
+if has_parser then
+  local react_buf = vim.api.nvim_create_buf(true, false)
+  vim.bo[react_buf].filetype = "typescript"
+  vim.api.nvim_buf_set_lines(react_buf, 0, -1, false, {
+    "const App = () => {",
+    "  const handler = () => {",
+    "    if (ready) {",
+    "      run()",
+    "    }",
+    "  }",
+    "  return null",
+    "}",
+  })
+  vim.treesitter.get_parser(react_buf, "typescript"):parse()
+  eq(
+    names(treesitter.get_symbols(react_buf, 0, { 4, 6 }, 8, "scope")),
+    { "App", "handler" },
+    "scope detail names arrow functions after their variables"
+  )
+  eq(
+    names(treesitter.get_symbols(react_buf, 0, { 7, 4 }, 8, "scope")),
+    { "App" },
+    "scope detail drops return statements"
+  )
+end
+
+local local_tree = symbols.normalize({
+  {
+    name = "outer",
+    kind = 12,
+    range = { start = { line = 0, character = 0 }, ["end"] = { line = 10, character = 0 } },
+    children = {
+      {
+        name = "count",
+        kind = 13,
+        range = { start = { line = 3, character = 2 }, ["end"] = { line = 3, character = 20 } },
+      },
+      {
+        name = "callback",
+        kind = 13,
+        range = { start = { line = 5, character = 2 }, ["end"] = { line = 8, character = 3 } },
+      },
+    },
+  },
+})
+eq(
+  names(symbols.scope(symbols.path(local_tree, { line = 3, character = 4 }))),
+  { "outer" },
+  "scope detail drops a single-line LSP variable at the cursor"
+)
+eq(
+  names(symbols.scope(symbols.path(local_tree, { line = 6, character = 4 }))),
+  { "outer", "callback" },
+  "scope detail keeps a multi-line LSP variable"
+)
+
+vim.cmd("silent! only")
+local ux_buf = vim.api.nvim_create_buf(true, false)
+vim.api.nvim_buf_set_name(ux_buf, root .. "/src/ux/panel.tsx")
+vim.api.nvim_win_set_buf(0, ux_buf)
+vim.api.nvim_buf_set_lines(ux_buf, 0, -1, false, vim.fn["repeat"]({ "        code" }, 30))
+local function lsp_range(start_line, start_character, end_line, end_character)
+  return {
+    start = { line = start_line, character = start_character },
+    ["end"] = { line = end_line, character = end_character },
+  }
+end
+local ux_symbols = {
+  {
+    name = "Panel",
+    kind = 5,
+    range = lsp_range(0, 0, 19, 1),
+    children = {
+      { name = "open", kind = 6, range = lsp_range(2, 2, 5, 3) },
+      {
+        name = "close",
+        kind = 6,
+        range = lsp_range(7, 2, 10, 3),
+        children = { { name = "count", kind = 13, range = lsp_range(8, 4, 8, 20) } },
+      },
+    },
+  },
+  { name = "helper", kind = 12, range = lsp_range(21, 0, 25, 1) },
+}
+local ux_client = { offset_encoding = "utf-16" }
+function ux_client:request(_, _, callback)
+  vim.schedule(function()
+    callback(nil, ux_symbols)
+  end)
+  return true, 1
+end
+function ux_client:cancel_request() end
+vim.lsp.get_clients = function()
+  return { ux_client }
+end
+
+local function rendered(win)
+  return vim.api.nvim_eval_statusline(vim.wo[win].winbar, { winid = win, use_winbar = true }).str
+end
+
+zed_bar.setup({ update_debounce = 0, symbol_debounce = 0 })
+vim.api.nvim_win_set_cursor(0, { 9, 6 })
+zed_bar.refresh()
+vim.wait(200, function()
+  return vim.wo.winbar:find("close", 1, true) ~= nil
+end)
+eq(
+  rendered(0),
+  " src/ux/panel.tsx ● › " .. icons.Class .. "Panel › " .. icons.Method .. "close ",
+  "scope detail drops the local variable at the cursor and the modified flag follows the name"
+)
+assert(vim.wo.winbar:find("ZedBarModified", 1, true), "modified flag has its own highlight")
+vim.bo[ux_buf].modified = false
+zed_bar._render(0)
+eq(
+  rendered(0),
+  " src/ux/panel.tsx › " .. icons.Class .. "Panel › " .. icons.Method .. "close ",
+  "the modified flag disappears after the buffer is saved"
+)
+vim.bo[ux_buf].readonly = true
+zed_bar._render(0)
+assert(vim.wo.winbar:find("ZedBarReadonly", 1, true), "readonly buffers are flagged")
+vim.bo[ux_buf].readonly = false
+
+local wide_win = vim.api.nvim_get_current_win()
+vim.cmd("vsplit")
+local narrow_win = vim.api.nvim_get_current_win()
+vim.cmd("vertical resize 37")
+zed_bar._render(narrow_win)
+eq(
+  rendered(narrow_win),
+  " s/u/panel.tsx › " .. icons.Class .. "Panel › " .. icons.Method .. "close ",
+  "directories are abbreviated first when the window is narrow"
+)
+vim.cmd("vertical resize 26")
+zed_bar._render(narrow_win)
+eq(
+  rendered(narrow_win),
+  " panel.tsx › … › " .. icons.Method .. "close ",
+  "outer symbols collapse and directories drop before the file name or innermost symbol"
+)
+vim.cmd("vertical resize 14")
+zed_bar._render(narrow_win)
+local tiny = rendered(narrow_win)
+assert(vim.api.nvim_strwidth(tiny) <= 14, "the winbar fits a tiny window: " .. tiny)
+assert(tiny:find("panel.tsx", 1, true), "the file name survives a tiny window: " .. tiny)
+
+assert(vim.wo[wide_win].winbar:find("ZedBarInactive", 1, true), "inactive windows are dimmed")
+assert(
+  not vim.wo[wide_win].winbar:find("ZedBarKindMethod", 1, true),
+  "inactive windows do not use kind colors"
+)
+assert(
+  not vim.wo[narrow_win].winbar:find("ZedBarInactive", 1, true),
+  "the active window is not dimmed"
+)
+vim.api.nvim_set_current_win(wide_win)
+assert(
+  vim.wo[narrow_win].winbar:find("ZedBarInactive", 1, true),
+  "the window that loses focus is dimmed"
+)
+assert(
+  not vim.wo[wide_win].winbar:find("ZedBarInactive", 1, true),
+  "the window that gains focus is no longer dimmed"
+)
+vim.api.nvim_win_set_width(narrow_win, 40)
+zed_bar.setup({ dim_inactive = false, update_debounce = 0, symbol_debounce = 0 })
+assert(
+  vim.wo[narrow_win].winbar:find("ZedBarKindMethod", 1, true),
+  "dim_inactive = false keeps kind colors in inactive windows"
+)
+vim.cmd("silent! only")
+
+zed_bar.setup({ icons = false, update_debounce = 0, symbol_debounce = 0 })
+eq(rendered(0), " src/ux/panel.tsx › Panel › close ", "icons = false renders plain names")
+
+zed_bar.setup({ update_debounce = 0, symbol_debounce = 0 })
+local source_win = vim.api.nvim_get_current_win()
+local function menu_lines()
+  return vim.api.nvim_buf_get_lines(0, 0, -1, false)
+end
+local function press(keys)
+  vim.api.nvim_feedkeys(vim.keycode(keys), "x", false)
+end
+
+vim.api.nvim_win_set_cursor(source_win, { 9, 6 })
+zed_bar.pick()
+assert(
+  vim.api.nvim_get_current_win() ~= source_win and vim.api.nvim_win_get_config(0).relative ~= "",
+  "pick opens a floating menu"
+)
+eq(
+  menu_lines(),
+  { icons.Method .. "open", icons.Method .. "close" },
+  "the menu lists the siblings of the innermost symbol"
+)
+eq(vim.api.nvim_win_get_cursor(0)[1], 2, "the current symbol is selected")
+press("h")
+eq(
+  menu_lines(),
+  { icons.Class .. "Panel", icons.Function .. "helper" },
+  "h moves up to the parent level"
+)
+eq(vim.api.nvim_win_get_cursor(0)[1], 1, "the parent is selected")
+press("l")
+eq(menu_lines(), { icons.Method .. "open", icons.Method .. "close" }, "l opens the children")
+eq(vim.api.nvim_win_get_cursor(0)[1], 2, "the child on the current path is selected")
+press("k")
+press("<CR>")
+eq(vim.api.nvim_get_current_win(), source_win, "choosing an entry closes the menu")
+eq(vim.api.nvim_win_get_cursor(source_win), { 3, 2 }, "choosing an entry jumps to its start")
+
+zed_bar.pick()
+press("q")
+eq(vim.api.nvim_get_current_win(), source_win, "q closes the menu")
+eq(#vim.api.nvim_list_wins(), 1, "closing the menu removes the float")
+
+vim.api.nvim_win_set_cursor(source_win, { 9, 6 })
+zed_bar._render(source_win)
+zed_bar._click(1, 1, "l", "    ")
+eq(
+  menu_lines(),
+  { icons.Class .. "Panel", icons.Function .. "helper" },
+  "clicking the file name opens the top-level outline"
+)
+press("<Esc>")
+zed_bar._click(3, 1, "l", "    ")
+eq(
+  menu_lines(),
+  { icons.Method .. "open", icons.Method .. "close" },
+  "clicking a symbol opens its siblings"
+)
+press("<Esc>")
+
+vim.api.nvim_win_set_cursor(source_win, { 9, 6 })
+zed_bar.parent()
+eq(vim.api.nvim_win_get_cursor(0), { 8, 2 }, "parent jumps to the enclosing symbol start")
+zed_bar.parent()
+eq(vim.api.nvim_win_get_cursor(0), { 1, 0 }, "a second parent jump goes one level up")
+
+local original_notify = vim.notify
+local notified
+vim.notify = function(message)
+  notified = message
+end
+vim.api.nvim_win_set_cursor(source_win, { 9, 6 })
+zed_bar.yank()
+eq(vim.fn.getreg('"'), "src/ux/panel.tsx › Panel › close", "yank copies the breadcrumb text")
+
+vim.cmd("ZedBar toggle")
+eq(vim.wo.winbar, "", "toggle hides the winbar")
+vim.cmd("ZedBar toggle")
+assert(vim.wo.winbar:find("panel.tsx", 1, true), "toggle shows the winbar again")
+eq(
+  vim.fn.getcompletion("ZedBar ", "cmdline"),
+  { "info", "parent", "pick", "refresh", "toggle", "yank" },
+  ":ZedBar completes its subcommands"
+)
+vim.cmd("ZedBar info")
+vim.notify = original_notify
+assert(notified and notified:find("lsp", 1, true), "info reports the active source")
+
+local guide_buf = vim.api.nvim_create_buf(true, false)
+vim.api.nvim_buf_set_name(guide_buf, root .. "/docs/guide.md")
+vim.bo[guide_buf].filetype = "markdown"
+vim.api.nvim_buf_set_lines(guide_buf, 0, -1, false, {
+  "# Intro",
+  "## Setup",
+  "text",
+  "## Usage",
+  "text",
+  "# API",
+})
+vim.api.nvim_win_set_buf(source_win, guide_buf)
+vim.api.nvim_win_set_cursor(source_win, { 5, 0 })
+zed_bar.pick()
+eq(
+  menu_lines(),
+  { icons.MarkdownH2 .. "Setup", icons.MarkdownH2 .. "Usage" },
+  "Markdown headings list their siblings"
+)
+eq(vim.api.nvim_win_get_cursor(0)[1], 2, "the current heading is selected")
+press("h")
+eq(
+  menu_lines(),
+  { icons.MarkdownH1 .. "Intro", icons.MarkdownH1 .. "API" },
+  "h moves up to the parent heading level"
+)
+press("j")
+press("<CR>")
+eq(vim.api.nvim_win_get_cursor(source_win), { 6, 0 }, "choosing a heading jumps to it")
+
+vim.lsp.get_clients = function()
+  return {}
+end
+if has_scope_parser then
+  vim.api.nvim_buf_set_name(scope_buf, root .. "/src/scope.lua")
+  vim.api.nvim_win_set_buf(source_win, scope_buf)
+  vim.api.nvim_win_set_cursor(source_win, { 7, 10 })
+  zed_bar.pick()
+  eq(
+    menu_lines(),
+    { icons.Function .. "request_symbols", icons.Call .. "client:request" },
+    "Tree-sitter breadcrumbs open as a list of enclosing scopes"
+  )
+  press("k")
+  press("<CR>")
+  eq(vim.api.nvim_win_get_cursor(source_win), { 1, 0 }, "choosing a scope jumps to it")
+end
+vim.lsp.get_clients = original_get_clients
 
 print("zed-bar.nvim tests passed")

@@ -153,8 +153,12 @@ local links = {
 
 function M.setup_highlights(icons)
   vim.api.nvim_set_hl(0, "ZedBarNormal", { default = true, link = "WinBar" })
-  vim.api.nvim_set_hl(0, "ZedBarFile", { default = true, link = "Comment" })
+  vim.api.nvim_set_hl(0, "ZedBarDir", { default = true, link = "Comment" })
+  vim.api.nvim_set_hl(0, "ZedBarFile", { default = true, link = "WinBar" })
+  vim.api.nvim_set_hl(0, "ZedBarModified", { default = true, link = "DiagnosticWarn" })
+  vim.api.nvim_set_hl(0, "ZedBarReadonly", { default = true, link = "Comment" })
   vim.api.nvim_set_hl(0, "ZedBarSeparator", { default = true, link = "Comment" })
+  vim.api.nvim_set_hl(0, "ZedBarInactive", { default = true, link = "WinBarNC" })
 
   for kind in pairs(icons or M.icons) do
     local link = links[kind] or "Normal"

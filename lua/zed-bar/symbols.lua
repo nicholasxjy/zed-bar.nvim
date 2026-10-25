@@ -133,6 +133,17 @@ function M.path(symbols, position, max_depth)
   return result
 end
 
+local binding_kinds = { [13] = true, [14] = true }
+
+-- A single-line variable or constant at the cursor is what the cursor is on, not where it is.
+function M.scope(path)
+  local last = path[#path]
+  if last and binding_kinds[last.kind] and last.range.start.line == last.range["end"].line then
+    path[#path] = nil
+  end
+  return path
+end
+
 function M.kind(symbol)
   if type(symbol.kind) == "string" then
     return symbol.kind

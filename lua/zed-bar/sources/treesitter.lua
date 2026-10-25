@@ -1,10 +1,11 @@
 local M = {}
 
 local type_kinds = {
+  -- Before "method" and "function" so `method_call` and `function_call` are calls.
+  { "call", "Call" },
   { "method", "Method" },
   { "constructor", "Constructor" },
   { "function", "Function" },
-  { "call", "Call" },
   { "class", "Class" },
   { "struct", "Struct" },
   { "interface", "Interface" },
@@ -256,20 +257,87 @@ local function short_name(node, buf, node_kind)
   return extract_name(node_text(node, buf))
 end
 
-local function symbols_from_node(node, buf, max_depth, matched_nodes)
+-- With `detail = "scope"`, only these kinds enclose the cursor as named scopes.
+local scope_kinds = {
+  BlockMappingPair = true,
+  Class = true,
+  Constructor = true,
+  Element = true,
+  Enum = true,
+  Function = true,
+  Interface = true,
+  Macro = true,
+  Method = true,
+  Module = true,
+  Namespace = true,
+  Pair = true,
+  Rule = true,
+  RuleSet = true,
+  Section = true,
+  Struct = true,
+  Type = true,
+}
+-- These are shown only when they name an anonymous scope below them (`const App = () => {`,
+-- `describe("x", function()`, `config = function()`).
+local naming_kinds = {
+  Call = true,
+  Constant = true,
+  Declaration = true,
+  EnumMember = true,
+  Field = true,
+  Property = true,
+  Variable = true,
+}
+local anonymous_kinds = { Class = true, Constructor = true, Function = true, Method = true }
+-- Unnamed data containers are scopes too, named by the key or binding that holds them.
+local container_types = { array = true, object = true, table_constructor = true }
+
+local function has_name(node)
+  return node:field("name")[1] ~= nil or node:field("declarator")[1] ~= nil
+end
+
+-- Whether `node` is shown at the "scope" detail level, and whether an anonymous scope at or
+-- below it is still waiting for an ancestor to name it.
+local function scope_role(node, node_type, node_kind, pending)
+  if node:named_child_count() == 0 then
+    return false, pending
+  end
+  if container_types[node_type] or (anonymous_kinds[node_kind] and not has_name(node)) then
+    return false, true
+  end
+  if scope_kinds[node_kind] then
+    return node_kind ~= "Type" or has_name(node), pending
+  end
+  if naming_kinds[node_kind] or node_type:find("assignment", 1, true) then
+    return pending, pending
+  end
+  return false, pending
+end
+
+local function symbols_from_node(node, buf, max_depth, matched_nodes, scope)
   local result = {}
   local previous_canonical
+  local pending = false
   while node and #result < max_depth do
-    local node_kind = kind(node:type())
-    if node_kind and (not matched_nodes or matched_nodes[node:id()]) then
-      local name = short_name(node, buf, node_kind)
-      if name ~= "" then
-        local canonical = canonical_name(name)
-        if not previous_canonical or previous_canonical ~= canonical then
-          result[#result + 1] = { name = name, kind = node_kind }
-          previous_canonical = canonical
-        end
+    local node_type = node:type()
+    local node_kind = kind(node_type)
+    local shown = not matched_nodes or matched_nodes[node:id()]
+    if shown and scope then
+      shown, pending = scope_role(node, node_type, node_kind, pending)
+      if shown and not naming_kinds[node_kind] and not scope_kinds[node_kind] then
+        -- An assignment naming the anonymous scope below it.
+        node_kind = "Variable"
       end
+    end
+    local name = shown and node_kind and short_name(node, buf, node_kind) or ""
+    if name ~= "" then
+      local canonical = canonical_name(name)
+      if not previous_canonical or previous_canonical ~= canonical then
+        local row, col = node:start()
+        result[#result + 1] = { name = name, kind = node_kind, row = row, col = col }
+        previous_canonical = canonical
+      end
+      pending = false
     end
     node = node:parent()
   end
@@ -415,7 +483,8 @@ local function current_parser(buf)
   return parser
 end
 
-function M.get_symbols(buf, win, cursor, max_depth)
+function M.get_symbols(buf, win, cursor, max_depth, detail)
+  local scope = detail == "scope"
   local column = cursor[2]
   if column > 0 and vim.api.nvim_get_mode().mode:find("i", 1, true) then
     column = column - 1
@@ -425,11 +494,11 @@ function M.get_symbols(buf, win, cursor, max_depth)
   local position = { cursor[1], column }
   local matched_nodes = ts_utils and parser and query_nodes(buf, position, parser)
   local node = node_at_cursor(buf, win, position, ts_utils)
-  local result = symbols_from_node(node, buf, max_depth, matched_nodes)
+  local result = symbols_from_node(node, buf, max_depth, matched_nodes, scope)
   if result[1] or not matched_nodes then
     return result
   end
-  return symbols_from_node(node, buf, max_depth)
+  return symbols_from_node(node, buf, max_depth, nil, scope)
 end
 
 function M.invalidate() end
