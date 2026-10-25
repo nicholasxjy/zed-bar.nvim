@@ -15,11 +15,16 @@ function M.get_symbols(source_names, context)
         result = result()
       end
     elseif builtins[name] then
-      result =
-        builtins[name].get_symbols(context.buf, context.win, context.cursor, context.max_depth)
+      result = builtins[name].get_symbols(
+        context.buf,
+        context.win,
+        context.cursor,
+        context.max_depth,
+        context.detail
+      )
     end
     if result and result[1] then
-      return result
+      return result, name
     end
   end
   return {}

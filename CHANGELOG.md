@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- Show only enclosing scopes by default (`detail = "scope"`): anonymous functions and tables are
+  named after the binding, key, or call that holds them, and locals, calls, and control flow at the
+  cursor are left out; `detail = "full"` keeps the previous behavior
+- Split the path into a dimmed directory (`ZedBarDir`) and the file name (`ZedBarFile`), with a file
+  icon from mini.icons or nvim-web-devicons and modified/readonly flags (`file_status`)
+- Fit narrow windows by abbreviating directories, collapsing outer symbols into `…`, and truncating
+  the innermost name while keeping the file name visible
+- Dim inactive windows with `ZedBarInactive` (`dim_inactive`)
+- Click a symbol to open a menu of its siblings, or the file name for the top-level outline; move
+  between levels with `h`/`l` and jump with `<CR>`
+- Add `:ZedBar {pick,parent,yank,toggle,refresh,info}` and the matching Lua functions
+- Add `icons = false` for fonts without Nerd Font glyphs
+
+### Changed
+
+- `ZedBarFile` now covers only the file name and links to `WinBar`; the directory uses `ZedBarDir`
+- Tree-sitter `function_call` and `method_call` nodes are calls, not functions
+
 ## [v0.0.6] - 2026-10-02
 
 ### Performance

@@ -208,9 +208,33 @@ function M.get_symbols(buf, _, cursor, max_depth)
   local result = {}
   for index = #reversed, 1, -1 do
     local heading = reversed[index]
-    result[#result + 1] = { name = heading.name, kind = "MarkdownH" .. heading.level }
+    result[#result + 1] =
+      { name = heading.name, kind = "MarkdownH" .. heading.level, row = heading.line, col = 0 }
   end
   return result
+end
+
+-- All headings as a tree: each heading's children are the following headings of a deeper level.
+function M.tree(buf)
+  local headings = parse_to(buf, vim.api.nvim_buf_line_count(buf)).headings
+  local roots, stack = {}, {}
+  for _, heading in ipairs(headings) do
+    while stack[#stack] and stack[#stack].level >= heading.level do
+      stack[#stack] = nil
+    end
+    local node = {
+      name = heading.name,
+      kind = "MarkdownH" .. heading.level,
+      level = heading.level,
+      row = heading.line,
+      col = 0,
+      children = {},
+    }
+    local parent = stack[#stack]
+    table.insert(parent and parent.children or roots, node)
+    stack[#stack + 1] = node
+  end
+  return roots
 end
 
 function M.invalidate(buf)
