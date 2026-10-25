@@ -837,10 +837,19 @@ function M.setup(opts)
       render_buffer(args.buf, true)
     end,
   })
-  vim.api.nvim_create_autocmd({ "BufNewFile", "BufEnter", "BufModifiedSet" }, {
+  vim.api.nvim_create_autocmd({ "BufNewFile", "BufEnter" }, {
     group = group,
     callback = function(args)
       render_buffer(args.buf)
+    end,
+  })
+  -- Edits and writes already re-render through the text and write autocmds below; this covers
+  -- `:set nomodified` and friends. (`BufModifiedSet` was removed in Neovim 0.13.)
+  vim.api.nvim_create_autocmd("OptionSet", {
+    group = group,
+    pattern = "modified",
+    callback = function()
+      render_buffer(vim.api.nvim_get_current_buf())
     end,
   })
   vim.api.nvim_create_autocmd("BufReadPost", {

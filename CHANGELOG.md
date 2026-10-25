@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- Fix `setup()` failing on Neovim 0.13, which removed the `BufModifiedSet` event
+
 ## [v0.1.0] - 2026-10-25
 
 ### Features
