@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [v0.1.0] - 2026-10-25
+
 ### Features
 
 - Show only enclosing scopes by default (`detail = "scope"`): anonymous functions and tables are
